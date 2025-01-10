@@ -4,7 +4,7 @@
 #include <FastLED.h>
 #include "config.h" // Include the Wi-Fi credentials
 #include "edm.json"
-#include <SPIFFS.h> // For file system
+#include <SPIFFS.h>
 
 // Global variables for animation data
 #define NUM_LEDS 480
@@ -20,7 +20,7 @@ std::vector<std::vector<std::vector<uint8_t>>> frames;
 // LED setup
 #define NUM_LEDS 480
 TaskHandle_t animationTaskHandle = NULL;
-volatile int currentAnimationId = 0; // 0 = Off, 1 = pride
+volatile int currentAnimationId = 0;
 
 CRGB leds[NUM_LEDS];
 uint8_t brightness = 10; // Default brightness
@@ -172,9 +172,9 @@ void loadAnimation(const char *filename) {
         for (JsonArray row : frame) {
             std::vector<uint8_t> rowData;
             for (JsonArray pixel : row) {
-                rowData.push_back(pixel[0]); // Red
-                rowData.push_back(pixel[1]); // Green
-                rowData.push_back(pixel[2]); // Blue
+                rowData.push_back(pixel[0]);
+                rowData.push_back(pixel[1]);
+                rowData.push_back(pixel[2]);
             }
             frameData.push_back(rowData);
         }
