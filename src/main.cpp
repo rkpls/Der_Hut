@@ -1,10 +1,12 @@
+#include <Arduino.h>
+#include <FS.h>
+#include <SPIFFS.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
-#include <ArduinoJson.h>
 #include <FastLED.h>
+#include "../data/edm.json"
 #include "config.h" // Include the Wi-Fi credentials
-#include "edm.json"
-#include <SPIFFS.h>
+
 
 // Global variables for animation data
 #define NUM_LEDS 480
@@ -144,47 +146,6 @@ int getVirtualIndex(int x, int y) {
     }
 }
 
-void loadAnimation(const char *filename) {
-    if (!SPIFFS.begin(true)) {
-        Serial.println("Failed to mount file system!");
-        return;
-    }
-
-    File file = SPIFFS.open(filename, "r");
-    if (!file) {
-        Serial.println("Failed to open JSON file!");
-        return;
-    }
-
-    // Parse the JSON
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, file);
-    if (error) {
-        Serial.print("Failed to parse JSON: ");
-        Serial.println(error.c_str());
-        return;
-    }
-
-    // Extract frames
-    JsonArray jsonFrames = doc["frames"];
-    for (JsonArray frame : jsonFrames) {
-        std::vector<std::vector<uint8_t>> frameData;
-        for (JsonArray row : frame) {
-            std::vector<uint8_t> rowData;
-            for (JsonArray pixel : row) {
-                rowData.push_back(pixel[0]);
-                rowData.push_back(pixel[1]);
-                rowData.push_back(pixel[2]);
-            }
-            frameData.push_back(rowData);
-        }
-        frames.push_back(frameData);
-    }
-
-    numFrames = frames.size();
-    Serial.println("Animation loaded successfully!");
-}
-
 void pride() {
 // Pride Animation
 static uint8_t frame = 0;
@@ -243,43 +204,6 @@ void vip() {
     vTaskDelay(120 / portTICK_PERIOD_MS); // Adjust delay for animation speed
 }
 
-
-void edm() {
-    // Load the animation file
-    loadAnimation("/edm.json"); // Load the "edm.json" file
-
-    if (numFrames == 0) {
-        Serial.println("No frames found in the animation!");
-        return;
-    }
-
-    int frameIndex = 0; // Start with the first frame
-
-    while (currentAnimationId == 3) { // Assuming "3" is the ID for the EDM animation
-        // Get the current frame data
-        const std::vector<std::vector<uint8_t>> &frame = frames[frameIndex];
-
-        // Write the frame data to the LEDs
-        for (int y = 0; y < MATRIX_HEIGHT; y++) {
-            for (int x = 0; x < MATRIX_WIDTH; x++) {
-                int segment = x / SEGMENT_WIDTH;     // Which 16x10 segment
-                int localX = x % SEGMENT_WIDTH;      // Local x within the segment
-                int r = frame[y][localX * 3 + 0];    // Red
-                int g = frame[y][localX * 3 + 1];    // Green
-                int b = frame[y][localX * 3 + 2];    // Blue
-                leds[y * MATRIX_WIDTH + x] = CRGB(r, g, b);
-            }
-        }
-        FastLED.show();
-
-        // Move to the next frame
-        frameIndex = (frameIndex + 1) % numFrames;
-
-        // Control the animation speed
-        vTaskDelay(20 / portTICK_PERIOD_MS); // Adjust for 8 FPS
-    }
-}
-
 // animation Task
 void animationTask(void *parameter) {
     while (true) {
@@ -295,7 +219,7 @@ void animationTask(void *parameter) {
           vip();
         }
         else if (currentAnimationId == 3) {
-          edm();
+          delay(10); // edm animation
         }
         else{
           delay(10);
@@ -373,17 +297,6 @@ void setup() {
     });
 
     server.begin();
-
-    // Start the animation task
-    xTaskCreatePinnedToCore(
-        animationTask,
-        "Animation Task",
-        4096,
-        NULL,
-        1,
-        &animationTaskHandle,
-        1
-    );
 }
 
 
