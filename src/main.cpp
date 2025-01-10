@@ -146,6 +146,33 @@ int getVirtualIndex(int x, int y) {
     }
 }
 
+// Function to load the JSON animation file
+void loadAnimation(const char *filename) {
+    if (!SPIFFS.begin(true)) {
+        Serial.println("Failed to mount file system!");
+        return;
+    }
+
+    File file = SPIFFS.open(filename, "r");
+    if (!file) {
+        Serial.println("Failed to open JSON file!");
+        return;
+    }
+
+    // Parse the JSON
+    DynamicJsonDocument doc(8192); // Adjust size if needed
+    DeserializationError error = deserializeJson(doc, file);
+    if (error) {
+        Serial.print("Failed to parse JSON: ");
+        Serial.println(error.c_str());
+        return;
+    }
+
+    // Process the JSON data here
+    Serial.println("JSON loaded successfully!");
+    file.close();
+}
+
 void pride() {
 // Pride Animation
 static uint8_t frame = 0;
@@ -230,7 +257,7 @@ void animationTask(void *parameter) {
 // code
 
 void setup() {
-    Serial.begin(115200);
+    Serial.begin(9600);
 
     // Initialize LEDs
     FastLED.addLeds<WS2812B, 2, GRB>(leds, 0, 160);
@@ -295,6 +322,8 @@ void setup() {
             request->send(400, "text/plain", "No brightness value provided");
         }
     });
+
+    loadAnimation("../data/edm.json");
 
     server.begin();
 }
