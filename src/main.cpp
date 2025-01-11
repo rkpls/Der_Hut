@@ -1,98 +1,161 @@
-#include <Arduino.h>
-#include <FS.h>
-#include "config.h" // Include the Wi-Fi credentials
-#include "../data/settings.json" // settings to use at restart (brightness, animation ID, speed)
-#include "../data/vip.json" // frames: 1, 16x10 px
-#include "../data/edm.json" // frames: 40, 16x10 px
 #include <WiFi.h>
-#include <ESPAsyncWebServer.h>
 #include <FastLED.h>
+#include <ESPAsyncWebServer.h>
+#include <SPIFFS.h>
+#include "config.h" // Wi-Fi credentials
+#include <ArduinoJson.h> // For JSON parsing
 
-// Global variables for animation data
 #define DATA_PIN_1 2
 #define DATA_PIN_2 4
 #define DATA_PIN_3 5
-#define MATRIX_NUM_LEDS = 160
+#define MATRIX_NUM_LEDS 160
 #define VIRT_NUM_LEDS 480
+
 const int VIRT_WIDTH = 48;
 const int MATRIX_HEIGHT = 10;
 const int SEGMENT_WIDTH = 16;
 
-// LED setup
+CRGB leds[VIRT_NUM_LEDS];
 
-int getVirtualIndex(int x, int y) {
-    int panel = x / 16;
-    int localX = x % 16;
-    int localIndex;
-    if (y % 2 == 0) {
-        localIndex = y * 16 + localX;
-    } else {
-        localIndex = y * 16 + (15 - localX);
+int brightness = 10; // Default brightness
+int animation = 1;   // Default animation ID
+int speed = 10;      // Default speed
+
+AsyncWebServer server(80);
+
+void loadSettings() {
+    File file = SPIFFS.open("../files/settings.json", "r");
+    if (!file) {
+        Serial.println("Failed to open settings file");
+        return;
     }
-    if (panel == 0) {
-        return localIndex;
-    } else if (panel == 1) {
-        return localIndex + 160;
-    } else {
-        return localIndex + 320;
+    JsonDocument doc(256);
+    DeserializationError error = deserializeJson(doc, file);
+    if (error) {
+        Serial.println("Failed to parse settings file");
+        return;
     }
+
+    brightness = doc["brightness"] | 10;
+    animation = doc["animation"] | 1;
+    speed = doc["speed"] | 10;
+
+    file.close();
 }
 
-void pride() { // "pride" rainbow effect
-static uint8_t frame = 0;
-  for (int x = 0; x < 48; x++) {
-    for (int y = 0; y < 10; y++) {
-      uint8_t hue = (x * 10 + y * 10 + frame) % 256;
-      int index = getVirtualIndex(x, y);
-      leds[index] = CHSV(hue, 255, 255);
+void saveSettings() {
+    JsonDocument doc(256);
+    doc["brightness"] = brightness;
+    doc["animation"] = animation;
+    doc["speed"] = speed;
+
+    File file = SPIFFS.open("../files/settings.json", "w");
+    if (!file) {
+        Serial.println("Failed to open settings file for writing");
+        return;
     }
-  }
-  frame = (frame + 1) % 256; // Wrap
-  FastLED.show();
-  vTaskDelay(speed / portTICK_PERIOD_MS); // Speed value from settings.json 
+
+    if (serializeJson(doc, file) == 0) {
+        Serial.println("Failed to write to settings file");
+    }
+
+    file.close();
+}
+
+void pride() {
+    static uint8_t frame = 0;
+    for (int x = 0; x < VIRT_WIDTH; x++) {
+        for (int y = 0; y < MATRIX_HEIGHT; y++) {
+            uint8_t hue = (x * 10 + y * 10 + frame) % 256;
+            int index = y * VIRT_WIDTH + x; // Adjust as needed
+            leds[index] = CHSV(hue, 255, brightness);
+        }
+    }
+    frame = (frame + 1) % 256;
+    FastLED.show();
+    delay(speed);
+}
+
+void edm() {
+    // Placeholder for EDM animation
 }
 
 void vip() {
-    // display the 16x10 vip.json 3 times on the virtual matrix and wrap around smoothly 
-    FastLED.show();
+    static uint8_t frame = 0;
     frame = (frame + 1) % 48; // Wrap the frame offset around after 48
-    vTaskDelay(speed*12 / portTICK_PERIOD_MS); // Speed value from settings.json * 12
 }
 
-// animation Task 
 void animationTask(void *parameter) {
     while (true) {
-        //read settings from settings.json and call the animation set
-        // animation IDS: 0= Off; 1= pride; 2= VIP; 3= EDM; 4= dart (placeholder); 5= text to image (placeholder)
+        switch (animation) {
+            case 0:
+                FastLED.clear();
+                FastLED.show();
+                break;
+            case 1:
+                pride();
+                break;
+            case 2:
+                vip();
+                break;
+            case 3:
+                edm();
+                break;
+            default:
+                FastLED.clear();
+                FastLED.show();
+                break;
+        }
     }
 }
 
 void setup() {
-    Serial.begin(9600);
+    Serial.begin(115200);
 
-    // Initialize LEDs
-    FastLED.addLeds<WS2812B, 2, GRB>(leds, 0, 160);
-    FastLED.addLeds<WS2812B, 4, GRB>(leds, 160, 160);
-    FastLED.addLeds<WS2812B, 5, GRB>(leds, 320, 160);
+    if (!SPIFFS.begin(true)) {
+        Serial.println("An error occurred while mounting SPIFFS");
+        return;
+    }
+
+    loadSettings();
+
+    FastLED.addLeds<WS2812B, DATA_PIN_1, GRB>(leds, 0, MATRIX_NUM_LEDS);
+    FastLED.addLeds<WS2812B, DATA_PIN_2, GRB>(leds, MATRIX_NUM_LEDS, MATRIX_NUM_LEDS);
+    FastLED.addLeds<WS2812B, DATA_PIN_3, GRB>(leds, 2 * MATRIX_NUM_LEDS, MATRIX_NUM_LEDS);
+    FastLED.setBrightness(brightness);
     FastLED.clear();
-    FastLED.setBrightness(brightness); // get brightness from settings.json
     FastLED.show();
 
-    // Connect to Wi-Fi
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     while (WiFi.status() != WL_CONNECTED) {
         delay(200);
+        Serial.print(".");
     }
-    // Serve the webpage
+    Serial.println("Connected to Wi-Fi");
+
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        String htmlContent = loadHTML("../data/main.html"); // Load the file from
-        // ...
+        request->send(SPIFFS, "../files/main.html", "text/html");
     });
-    // Handle input write to settings.json
-    // send input / update to console log on the page
+
+    server.on("/update", HTTP_POST, [](AsyncWebServerRequest *request) {
+        if (request->hasParam("brightness", true)) {
+            brightness = request->getParam("brightness", true)->value().toInt();
+        }
+        if (request->hasParam("animation", true)) {
+            animation = request->getParam("animation", true)->value().toInt();
+        }
+        if (request->hasParam("speed", true)) {
+            speed = request->getParam("speed", true)->value().toInt();
+        }
+        saveSettings();
+        request->send(200, "text/plain", "Settings updated");
+    });
 
     server.begin();
+
+    xTaskCreatePinnedToCore(animationTask, "AnimationTask", 10000, nullptr, 1, nullptr, 0);
 }
+
 void loop() {
-    // No tasks in loop; everything is event-driven
+    // Keep loop empty
 }
