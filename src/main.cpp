@@ -2,6 +2,7 @@
 #include <FastLED.h>
 #include <ESPAsyncWebServer.h>
 #include <SPIFFS.h>
+#include <FS.h>
 #include "config.h" // Wi-Fi credentials
 #include <ArduinoJson.h> // For JSON parsing
 
@@ -12,8 +13,8 @@
 #define VIRT_NUM_LEDS 480
 
 const int VIRT_WIDTH = 48;
+const int MATRIX_WIDTH = 16;
 const int MATRIX_HEIGHT = 10;
-const int SEGMENT_WIDTH = 16;
 
 CRGB leds[VIRT_NUM_LEDS];
 
@@ -21,15 +22,20 @@ int brightness = 10; // Default brightness
 int animation = 1;   // Default animation ID
 int speed = 10;      // Default speed
 
+std::vector<std::vector<std::vector<uint8_t>>> frames;
+int numFrames = 0;
+int currentAnimationId = 0;
+
 AsyncWebServer server(80);
 
+//----------------------------------------------------------------
 void loadSettings() {
     File file = SPIFFS.open("../files/settings.json", "r");
     if (!file) {
         Serial.println("Failed to open settings file");
         return;
     }
-    JsonDocument doc(256);
+    DynamicJsonDocument doc(256);
     DeserializationError error = deserializeJson(doc, file);
     if (error) {
         Serial.println("Failed to parse settings file");
@@ -44,7 +50,7 @@ void loadSettings() {
 }
 
 void saveSettings() {
-    JsonDocument doc(256);
+    DynamicJsonDocument doc(256);
     doc["brightness"] = brightness;
     doc["animation"] = animation;
     doc["speed"] = speed;
@@ -61,7 +67,78 @@ void saveSettings() {
 
     file.close();
 }
+//----------------------------------------------------------------
+int getVirtualIndex(int x, int y) {
+    int panel = x / 16; // Determine which panel (0, 1, or 2)
+    int localX = x % 16; // Local x-coordinate within the panel
+    int localIndex;
+    // Zigzag arrangement: even rows left-to-right, odd rows right-to-left
+    if (y % 2 == 0) {
+        localIndex = y * 16 + localX;
+    } else {
+        localIndex = y * 16 + (15 - localX);
+    }
+    // Map to the appropriate panel
+    if (panel == 0) {
+        return localIndex; // Panel 1 (connected to pin 2)
+    } else if (panel == 1) {
+        return localIndex + 160; // Panel 2 (connected to pin 4)
+    } else {
+        return localIndex + 320; // Panel 3 (connected to pin 5)
+    }
+}
 
+bool loadAnimationFromJson(const char *filePath) {
+    // Clear previous frames
+    frames.clear();
+    numFrames = 0;
+
+    // Open the file
+    File file = LittleFS.open(filePath, "r");
+    if (!file) {
+        Serial.println("Failed to open JSON file!");
+        return false;
+    }
+
+    // Allocate a buffer for the file
+    size_t fileSize = file.size();
+    std::unique_ptr<char[]> jsonBuffer(new char[fileSize + 1]);
+    file.readBytes(jsonBuffer.get(), fileSize);
+    jsonBuffer[fileSize] = '\0';
+    file.close();
+
+    // Parse the JSON
+    StaticJsonDocument<4096> doc; // Adjust size as needed for your JSON data
+    DeserializationError error = deserializeJson(doc, jsonBuffer.get());
+    if (error) {
+        Serial.print("JSON parsing failed: ");
+        Serial.println(error.c_str());
+        return false;
+    }
+
+    // Extract frames
+    JsonArray jsonFrames = doc["frames"].as<JsonArray>();
+    for (JsonArray frame : jsonFrames) {
+        std::vector<std::vector<uint8_t>> frameData;
+        for (JsonArray row : frame) {
+            std::vector<uint8_t> rowData;
+            for (uint8_t value : row) {
+                rowData.push_back(value);
+            }
+            frameData.push_back(rowData);
+        }
+        frames.push_back(frameData);
+    }
+
+    numFrames = frames.size();
+    Serial.print("Loaded ");
+    Serial.print(numFrames);
+    Serial.println(" frames from JSON.");
+
+    return true;
+}
+
+//----------------------------------------------------------------
 void pride() {
     static uint8_t frame = 0;
     for (int x = 0; x < VIRT_WIDTH; x++) {
@@ -76,15 +153,60 @@ void pride() {
     delay(speed);
 }
 
+void vip() {
+    if (!loadAnimationFromJson("../files/vip.json")) {
+        Serial.println("Failed to load EDM animation!");
+        return;
+    }
+    static int frame = 0;
+    for (int y = 0; y < 10; y++) {
+        for (int x = 0; x < 48; x++) {
+            int segment = (x + frame) / 16 % 3;
+            int localX = (x + frame) % 16;
+            int index = getVirtualIndex(x, y);
+            leds[index] = CRGB(image[y][localX][0], image[y][localX][1], image[y][localX][2]);
+        }
+    }
+    FastLED.show();
+    frame = (frame + 1) % 48; // Wrap
+    vTaskDelay(speed * 12 / portTICK_PERIOD_MS);
+}
+
 void edm() {
+    if (!loadAnimationFromJson("../files/edm.json")) {
+        Serial.println("Failed to load EDM animation!");
+        return;
+    }
+    int frameIndex = 0;
+    while (currentAnimationId == 3) {
+        const std::vector<std::vector<uint8_t>> &frame = frames[frameIndex];
+        for (int y = 0; y < MATRIX_HEIGHT; y++) {
+            for (int x = 0; x < MATRIX_WIDTH; x++) {
+                int segment = x / 16;
+                int localX = x % 16;
+                int r = frame[y][localX * 3 + 0];
+                int g = frame[y][localX * 3 + 1];
+                int b = frame[y][localX * 3 + 2];
+                leds[y * MATRIX_WIDTH + x] = CRGB(r, g, b);
+            }
+        }
+        FastLED.show();
+        frameIndex = (frameIndex + 1) % numFrames;
+        vTaskDelay(speed * 2 / portTICK_PERIOD_MS);
+    }
+}
+
+
+void dart() {
     // Placeholder for EDM animation
 }
 
-void vip() {
-    static uint8_t frame = 0;
-    frame = (frame + 1) % 48; // Wrap the frame offset around after 48
+void text() {
+    // Placeholder for EDM animation
 }
 
+
+//----------------------------------------------------------------
 void animationTask(void *parameter) {
     while (true) {
         switch (animation) {
@@ -101,6 +223,12 @@ void animationTask(void *parameter) {
             case 3:
                 edm();
                 break;
+            case 4:
+                dart();
+                break;
+            case 5:
+                text();
+                break;
             default:
                 FastLED.clear();
                 FastLED.show();
@@ -108,9 +236,14 @@ void animationTask(void *parameter) {
         }
     }
 }
-
+//----------------------------------------------------------------
 void setup() {
     Serial.begin(115200);
+    
+    if (!LittleFS.begin()) {
+        Serial.println("An error occurred while mounting LittleFS");
+        return;
+    }
 
     if (!SPIFFS.begin(true)) {
         Serial.println("An error occurred while mounting SPIFFS");

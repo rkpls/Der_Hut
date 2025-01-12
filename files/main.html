@@ -7,13 +7,20 @@
 </head>
 <body>
     <h1>ESP32 Animation Control</h1>
-    <div id="brightness-label">Brightness: 10%</div>
-    <input id="brightness-slider" type="range" min="0" max="96" value="10" onchange="updateBrightness(this.value)">
     <br>
     <button onclick="sendCommand('0')">Turn Off</button><br>
     <button onclick="sendCommand('1')">Pride</button><br>
     <button onclick="sendCommand('2')">VIP</button><br>
     <button onclick="sendCommand('3')">EDM</button>
+    <button onclick="sendCommand('4')">Dart</button>
+    <button onclick="sendCommand('5')">Text</button>
+    <br>
+    <div id="text-input"></div>
+    <div id="brightness-label">Brightness: 10%</div>
+    <br>
+    <input id="brightness-slider" type="range" min="0" max="96" value="10" onchange="updateBrightness(this.value)">
+    <div id="Speed-label">Speed: 10</div>
+    <input id="speed-slider" type="range" min="5" max="25" value="10" onchange="updateSpeed(this.value)">
     <div id="console"></div>
     <script>
         function sendCommand(preset) {
@@ -36,6 +43,17 @@
                     consoleDiv.scrollTop = consoleDiv.scrollHeight;
                 });
         }
+        function updateSpeed(value) {
+            const label = document.getElementById('speed-label');
+            label.textContent = `Speed: ${Math.round(value)}`;
+            fetch('/speed?b=' + value)
+                .then(response => response.text())
+                .then(data => {
+                    const consoleDiv = document.getElementById('console');
+                    consoleDiv.innerHTML += `<div>ESP: ${data}</div>`;
+                    consoleDiv.scrollTop = consoleDiv.scrollHeight;
+                });
+        }        
     </script>
 </body>
 </html>
