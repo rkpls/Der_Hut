@@ -1,10 +1,35 @@
 <!DOCTYPE html>
 <html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=0.5">
-    <title>The Hat Animation Control</title>
-    <link rel="stylesheet" href="css.css">
-</head>
+    <head>
+        <meta charset="UTF-8">
+        <title>ESP32 Animation Control</title>
+        <script>
+            function sendPostRequest(endpoint, data) {
+                fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                })
+                .then(response => response.json())
+                .then(data => console.log('Success:', data))
+                .catch((error) => console.error('Error:', error));
+            }
+    
+            function setAnimation(animationId) {
+                sendPostRequest('/setAnimation', { animation: animationId });
+            }
+    
+            function setBrightness(value) {
+                sendPostRequest('/setBrightness', { brightness: value });
+            }
+    
+            function setSpeed(value) {
+                sendPostRequest('/setSpeed', { speed: value });
+            }
+        </script>
+    </head>
 <body>
     <style>
         body {
@@ -54,55 +79,16 @@
             font-size: 12px;
         }
     </style>
-    <h1>ESP32 Animation Control</h1>
-    <br>
-    <button onclick="sendCommand('0')">Turn Off</button><br>
-    <button onclick="sendCommand('1')">Pride</button><br>
-    <button onclick="sendCommand('2')">VIP</button><br>
-    <button onclick="sendCommand('3')">EDM</button>
-    <button onclick="sendCommand('4')">Dart</button>
-    <button onclick="sendCommand('5')">Text</button>
-    <br>
-    <div id="text-input"></div>
-    <div id="brightness-label">Brightness: 10%</div>
-    <br>
-    <input id="brightness-slider" type="range" min="0" max="255" value="10" onchange="updateBrightness(this.value)">
-    <div id="Speed-label">Speed: 10</div>
-    <input id="speed-slider" type="range" min="5" max="25" value="10" onchange="updateSpeed(this.value)">
-    <div id="console"></div>
-    <script>
-        function sendCommand(preset) {
-            fetch('/set?p=' + preset)
-                .then(response => response.text())
-                .then(data => {
-                    const consoleDiv = document.getElementById('console');
-                    consoleDiv.innerHTML += `<div>ESP: ${data}</div>`;
-                    consoleDiv.scrollTop = consoleDiv.scrollHeight;
-                });
-        }
-        function updateBrightness(value) {
-            const label = document.getElementById('brightness-label');
-            label.textContent = `Brightness: ${Math.round((value / 255) * 100)}%`;
-            fetch('/brightness?b=' + value)
-                .then(response => response.text())
-                .then(data => {
-                    const consoleDiv = document.getElementById('console');
-                    consoleDiv.innerHTML += `<div>ESP: ${data}</div>`;
-                    consoleDiv.scrollTop = consoleDiv.scrollHeight;
-                });
-        }
-        function updateSpeed(value) {
-            const label = document.getElementById('Speed-label');
-            label.textContent = `Speed: ${value}`;
-            fetch('/speed?b=' + value)
-                .then(response => response.text())
-                .then(data => {
-                    const consoleDiv = document.getElementById('console');
-                    consoleDiv.innerHTML += `<div>ESP: ${data}</div>`;
-                    consoleDiv.scrollTop = consoleDiv.scrollHeight;
-                });
-        }
-</script>       
-    </script>
-</body>
-</html>
+    <body>
+        <button onclick="setAnimation(0)">Turn Off</button>
+        <button onclick="setAnimation(1)">Pride</button>
+        <button onclick="setAnimation(2)">VIP</button>
+        <button onclick="setAnimation(3)">EDM</button>
+        <br><br>
+        <label for="brightness">Brightness: </label>
+        <input type="range" id="brightness" min="0" max="255" value="10" oninput="setBrightness(this.value)">
+        <br><br>
+        <label for="speed">Speed: </label>
+        <input type="range" id="speed" min="5" max="25" value="10" oninput="setSpeed(this.value)">
+    </body>
+    </html>

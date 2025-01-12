@@ -48,116 +48,6 @@ int getVirtualIndex(int x, int y) {
     }
 }
 
-bool loadAnimationFromJson(const char *filePath) {
-    frames.clear();
-    numFrames = 0;
-    // Open the file
-    File file = LittleFS.open(filePath, "r");
-    if (!file) {
-        Serial.println("Failed to open JSON file!");
-        return false;
-    }
-    // Allocate a buffer for the file
-    size_t fileSize = file.size();
-    std::unique_ptr<char[]> jsonBuffer(new char[fileSize + 1]);
-    file.readBytes(jsonBuffer.get(), fileSize);
-    jsonBuffer[fileSize] = '\0';
-    file.close();
-    StaticJsonDocument<4096> doc;
-    DeserializationError error = deserializeJson(doc, jsonBuffer.get());
-    if (error) {
-        Serial.print("JSON parsing failed: ");
-        Serial.println(error.c_str());
-        return false;
-    }
-    // Extract frames
-    JsonArray jsonFrames = doc["frames"].as<JsonArray>();
-    for (JsonArray frame : jsonFrames) {
-        std::vector<std::vector<uint8_t>> frameData;
-        for (JsonArray row : frame) {
-            std::vector<uint8_t> rowData;
-            for (uint8_t value : row) {
-                rowData.push_back(value);
-            }
-            frameData.push_back(rowData);
-        }
-        frames.push_back(frameData);
-    }
-
-    numFrames = frames.size();
-    Serial.print("Loaded ");
-    Serial.print(numFrames);
-    Serial.println(" frames from JSON.");
-
-    return true;
-}
-
-//----------------------------------------------------------------
-void pride() {
-    static uint8_t frame = 0;
-    while (currentAnimationId == 1) {
-        for (int x = 0; x < VIRT_WIDTH; x++) {
-            for (int y = 0; y < MATRIX_HEIGHT; y++) {
-                uint8_t hue = (x * 10 + y * 10 + frame) % 256;
-                int index = y * VIRT_WIDTH + x;
-                leds[index] = CHSV(hue, 255, brightness);
-            }
-        }
-        frame = (frame + 1) % 256;
-        FastLED.show();
-        vTaskDelay(speed * 12 / portTICK_PERIOD_MS);
-    }
-}
-
-void vip() {
-    if (!loadAnimationFromJson("/vip.json")) {
-        Serial.println("Failed to load VIP animation!");
-        return;
-    }
-    static int frame = 0;
-    while (currentAnimationId == 2) {
-        for (int y = 0; y < MATRIX_HEIGHT; y++) {
-            for (int x = 0; x < MATRIX_WIDTH; x++) {
-                int localX = (x + frame) % 16;
-                int segment = (x + frame) / 16 % 3;
-                int index = getVirtualIndex(x, y);
-                leds[index] = CRGB(
-                    image[y][localX][0], 
-                    image[y][localX][1], 
-                    image[y][localX][2]
-                );
-            }
-        }
-        FastLED.show();
-        frame = (frame + 1) % MATRIX_WIDTH; // Wrap around the full width
-        vTaskDelay(speed * 12 / portTICK_PERIOD_MS);
-    }
-}
-
-void edm() {
-    if (!loadAnimationFromJson("/edm.json")) {
-        Serial.println("Failed to load EDM animation!");
-        return;
-    }
-    int frameIndex = 0;
-    while (currentAnimationId == 3) {
-        const std::vector<std::vector<uint8_t>> &frame = frames[frameIndex];
-        for (int y = 0; y < MATRIX_HEIGHT; y++) {
-            for (int x = 0; x < MATRIX_WIDTH; x++) {
-                int segment = x / 16;
-                int localX = x % 16;
-                int r = frame[y][localX * 3 + 0];
-                int g = frame[y][localX * 3 + 1];
-                int b = frame[y][localX * 3 + 2];
-                leds[y * MATRIX_WIDTH + x] = CRGB(r, g, b);
-            }
-        }
-        FastLED.show();
-        frameIndex = (frameIndex + 1) % numFrames;
-        vTaskDelay(speed * 2 / portTICK_PERIOD_MS);
-    }
-}
-
 //----------------------------------------------------------------
 void animationTask(void *parameter) {
     while (true) {
@@ -165,15 +55,6 @@ void animationTask(void *parameter) {
             case 0:
                 FastLED.clear();
                 FastLED.show();
-                break;
-            case 1:
-                pride();
-                break;
-            case 2:
-                vip();
-                break;
-            case 3:
-                edm();
                 break;
             default:
                 FastLED.clear();
@@ -214,34 +95,62 @@ void setup() {
         request->send(LittleFS, "/main.html", "text/html");
     });
 
-    server.on("/brightness", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (request->hasParam("b")) {
-            brightness = request->getParam("b")->value().toInt();
-            FastLED.setBrightness(brightness);
-            request->send(200, "text/plain", "Brightness updated");
+    server.on("/setAnimation", HTTP_POST, [](AsyncWebServerRequest *request){
+        if (request->hasParam("body", true)) {
+            String body = request->getParam("body", true)->value();
+            StaticJsonDocument<200> doc;
+            DeserializationError error = deserializeJson(doc, body);
+            if (!error) {
+                int animationId = doc["animation"];
+                // Set the animation ID accordingly
+                currentAnimationId = animationId;
+                request->send(200, "application/json", "{\"status\":\"success\"}");
+            } else {
+                request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Invalid JSON\"}");
+            }
         } else {
-            request->send(400, "text/plain", "Missing parameter");
+            request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"No body found\"}");
         }
     });
 
-    server.on("/speed", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (request->hasParam("b")) {
-            speed = request->getParam("b")->value().toInt();
-            request->send(200, "text/plain", "Speed updated");
+    server.on("/setBrightness", HTTP_POST, [](AsyncWebServerRequest *request){
+        if (request->hasParam("body", true)) {
+            String body = request->getParam("body", true)->value();
+            StaticJsonDocument<200> doc;
+            DeserializationError error = deserializeJson(doc, body);
+            if (!error) {
+                int brightnessValue = doc["brightness"];
+                // Set the brightness accordingly
+                brightness = brightnessValue;
+                FastLED.setBrightness(brightness);
+                request->send(200, "application/json", "{\"status\":\"success\"}");
+            } else {
+                request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Invalid JSON\"}");
+            }
         } else {
-            request->send(400, "text/plain", "Missing parameter");
+            request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"No body found\"}");
         }
     });
 
-    server.on("/set", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (request->hasParam("p")) {
-            animation = request->getParam("p")->value().toInt();
-            request->send(200, "text/plain", "Animation updated");
+    server.on("/setSpeed", HTTP_POST, [](AsyncWebServerRequest *request){
+        if (request->hasParam("body", true)) {
+            String body = request->getParam("body", true)->value();
+            StaticJsonDocument<200> doc;
+            DeserializationError error = deserializeJson(doc, body);
+            if (!error) {
+                int speedValue = doc["speed"];
+                // Set the speed accordingly
+                speed = speedValue;
+                request->send(200, "application/json", "{\"status\":\"success\"}");
+            } else {
+                request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Invalid JSON\"}");
+            }
         } else {
-            request->send(400, "text/plain", "Missing parameter");
+            request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"No body found\"}");
         }
     });
 
+    // Start server
     server.begin();
     Serial.println("Server started at: http://" + WiFi.localIP().toString());
 
