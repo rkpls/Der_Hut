@@ -48,9 +48,12 @@
             padding: 10px;
             margin-top: 20px;
             height: 200px;
-            overflow-y: hidden;
+            overflow-y: scroll;
             text-align: left;
             font-size: 12px;
+        }
+        input {
+            width: 80%;
         }
     </style>
     <body>
@@ -60,6 +63,39 @@
         <button onclick="setAnimation(3)">EDM</button>
         <br>
         <label for="brightness">Brightness: </label>
+        <br>
         <input type="range" id="brightness" min="0" max="255" value="10" oninput="setBrightness(this.value)">
+        <div id="console"></div>
+
+        <script>
+            async function setAnimation(animationId) {
+                try {
+                    const response = await fetch(`/set?p=${animationId}`);
+                    const text = await response.text();
+                    logToConsole(text);
+                } catch (error) {
+                    logToConsole(`Error setting animation: ${error.message}`);
+                }
+            }
+
+            async function setBrightness(brightness) {
+                try {
+                    const response = await fetch(`/brightness?b=${brightness}`);
+                    const text = await response.text();
+                    logToConsole(text);
+                } catch (error) {
+                    logToConsole(`Error setting brightness: ${error.message}`);
+                }
+            }
+
+            function logToConsole(message) {
+                const consoleDiv = document.getElementById('console');
+                const logEntry = document.createElement('div');
+                logEntry.textContent = message;
+                consoleDiv.appendChild(logEntry);
+                consoleDiv.scrollTop = consoleDiv.scrollHeight; // Auto-scroll to the latest log
+                console.log(message); // Log to the browser console as well
+            }
+        </script>
     </body>
-    </html>
+</html>

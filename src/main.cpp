@@ -22,10 +22,19 @@ int brightness = 10; // Default brightness
 int animation = 1;   // Default animation ID
 int speed = 10;      // Default speed
 
+std::vector<std::vector<std::vector<uint8_t>>> image;
+std::vector<std::vector<std::vector<uint8_t>>> frames;
 int numFrames = 0;
 int currentAnimationId = 0;
 
 AsyncWebServer server(80);
+AsyncWebSocket ws("/ws");
+
+//----------------------------------------------------------------
+void sendLog(const String &log) {
+    ws.textAll(log); // Broadcast log message to all connected WebSocket clients
+    Serial.println(log); // Also print to Serial console for debugging
+}
 
 //----------------------------------------------------------------
 int getVirtualIndex(int x, int y) {
@@ -46,7 +55,52 @@ int getVirtualIndex(int x, int y) {
     }
 }
 
+bool loadAnimationFrames(const char *fileName, const char *key, std::vector<std::vector<std::vector<uint8_t>>> &animationFrames, int &frameCount) {
+    File file = LittleFS.open(fileName, "r");
+    if (!file) {
+        sendLog(String("Failed to open file: ") + fileName);
+        return false;
+    }
+
+    DynamicJsonDocument doc(30000); // Adjust size based on file size
+    DeserializationError error = deserializeJson(doc, file);
+    file.close();
+
+    if (error) {
+        sendLog(String("Failed to parse JSON file: ") + fileName);
+        return false;
+    }
+
+    JsonArray jsonFrames = doc[key].as<JsonArray>();
+    if (jsonFrames.isNull()) {
+        sendLog(String("Key '") + key + "' not found in file: " + fileName);
+        return false;
+    }
+
+    animationFrames.resize(jsonFrames.size());
+    frameCount = jsonFrames.size();
+
+    for (size_t i = 0; i < jsonFrames.size(); i++) {
+        JsonArray frame = jsonFrames[i];
+        animationFrames[i].resize(frame.size());
+        for (size_t y = 0; y < frame.size(); y++) {
+            JsonArray row = frame[y];
+            animationFrames[i][y].resize(row.size() * 3); // Multiply by 3 for RGB triplets
+            for (size_t x = 0; x < row.size(); x++) {
+                JsonArray pixel = row[x];
+                animationFrames[i][y][x * 3] = pixel[0].as<uint8_t>();     // Red
+                animationFrames[i][y][x * 3 + 1] = pixel[1].as<uint8_t>(); // Green
+                animationFrames[i][y][x * 3 + 2] = pixel[2].as<uint8_t>(); // Blue
+            }
+        }
+    }
+
+    sendLog(String("Loaded ") + frameCount + String(" frames from: ") + fileName);
+    return true;
+}   
+
 //----------------------------------------------------------------
+
 void pride() {
     static uint16_t frame = 0; // Keeps track of the animation frame
     for (int y = 0; y < MATRIX_HEIGHT; y++) {
@@ -56,19 +110,61 @@ void pride() {
             leds[getVirtualIndex(x, y)] = CHSV(hue, 255, 255); // Full saturation and brightness
         }
     }
-
-    // Show the updated LEDs
     FastLED.show();
-
-    // Increment the frame for the next iteration
-    frame += speed / 10; // Adjust speed dynamically
+    frame += speed / 10;
     if (frame >= 255) {
-        frame = 0; // Reset frame to loop the animation
+        frame = 0;
     }
-
-    // Delay to control the animation speed
     vTaskDelay(speed / portTICK_PERIOD_MS);
 }
+
+void vip() {
+    static int offset = 0; // Offset for rotating the image
+    int imgWidth = image[0][0].size() / 3; // Divide by 3 to get actual width
+    int imgHeight = image[0].size();
+
+    for (int y = 0; y < MATRIX_HEIGHT; y++) {
+        for (int x = 0; x < VIRT_WIDTH; x++) {
+            int imgX = (x + offset) % imgWidth; // Rotate horizontally
+            int imgY = y % imgHeight;
+            int baseIndex = imgX * 3; // Calculate RGB index
+            leds[getVirtualIndex(x, y)] = CRGB(
+                image[0][imgY][baseIndex],     // Red
+                image[0][imgY][baseIndex + 1], // Green
+                image[0][imgY][baseIndex + 2]  // Blue
+            );
+        }
+    }
+
+    FastLED.show();
+    offset = (offset + 1) % imgWidth; // Increment offset for rotation
+    vTaskDelay(speed * 12 / portTICK_PERIOD_MS);
+}
+
+
+void edm() {
+    static int frameIndex = 0; // Keeps track of the current frame
+    int imgWidth = frames[0][0].size() / 3; // Divide by 3 to get actual width
+    int imgHeight = frames[0].size();
+
+    for (int y = 0; y < MATRIX_HEIGHT; y++) {
+        for (int x = 0; x < VIRT_WIDTH; x++) {
+            int imgX = x % imgWidth; // Repeat image horizontally
+            int imgY = y % imgHeight;
+            int baseIndex = imgX * 3; // Calculate RGB index
+            leds[getVirtualIndex(x, y)] = CRGB(
+                frames[frameIndex][imgY][baseIndex],     // Red
+                frames[frameIndex][imgY][baseIndex + 1], // Green
+                frames[frameIndex][imgY][baseIndex + 2]  // Blue
+            );
+        }
+    }
+
+    FastLED.show();
+    frameIndex = (frameIndex + 1) % numFrames; // Move to the next frame
+    vTaskDelay(speed / portTICK_PERIOD_MS); // Control animation speed
+}
+
 
 void animationTask(void *parameter) {
     while (true) {
@@ -76,11 +172,16 @@ void animationTask(void *parameter) {
             case 0:
                 FastLED.clear();
                 FastLED.show();
-                vTaskDelay(100 / portTICK_PERIOD_MS);
                 break;
             case 1:
                 pride();
                 break;
+            case 2:
+                vip();
+                break;            
+            case 3:
+                edm();
+                break;       
             default:
                 FastLED.clear();
                 FastLED.show();
@@ -89,14 +190,25 @@ void animationTask(void *parameter) {
         vTaskDelay(10 / portTICK_PERIOD_MS); // Prevent busy looping
     }
 }
+
 //----------------------------------------------------------------
 void setup() {
     Serial.begin(115200);
 
     if (LittleFS.begin()) {
-        Serial.println("LittleFS mounted.");
+        sendLog("LittleFS mounted.");
     } else {
-        Serial.println("LittleFS mount failed.");
+        sendLog("LittleFS mount failed.");
+    }
+
+    // Load VIP animation
+    if (!loadAnimationFrames("/vip.json", "vip_img", image, numFrames)) {
+        sendLog("Failed to load VIP animation.");
+    }
+
+    // Load EDM animation
+    if (!loadAnimationFrames("/edm.json", "edm_animation", frames, numFrames)) {
+        sendLog("Failed to load EDM animation.");
     }
 
     FastLED.addLeds<WS2812B, DATA_PIN_1, GRB>(leds, 0, MATRIX_NUM_LEDS);
@@ -111,9 +223,18 @@ void setup() {
         delay(200);
         Serial.print(".");
     }
-    Serial.println("Connected to Wi-Fi");
-    Serial.print("IP Address: ");
-    Serial.println(WiFi.localIP());
+    sendLog("Connected to Wi-Fi");
+    sendLog("IP Address: " + WiFi.localIP().toString());
+
+    // Set up WebSocket
+    ws.onEvent([](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
+        if (type == WS_EVT_CONNECT) {
+            sendLog("WebSocket client connected.");
+        } else if (type == WS_EVT_DISCONNECT) {
+            sendLog("WebSocket client disconnected.");
+        }
+    });
+    server.addHandler(&ws);
 
     // Set up routes
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -124,36 +245,34 @@ void setup() {
         if (request->hasParam("b")) {
             brightness = request->getParam("b")->value().toInt();
             FastLED.setBrightness(brightness);
-            request->send(200, "text/plain", "Brightness updated");
-        } else {
-            request->send(400, "text/plain", "Missing parameter");
-        }
-    });
+            request->send(200, "text/plain", "Brightness set to: " + String(brightness));
+            sendLog("Brightness set to: " + String(brightness));
+        }}       
+    );
 
     server.on("/speed", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (request->hasParam("b")) {
             speed = request->getParam("b")->value().toInt();
-            request->send(200, "text/plain", "Speed updated");
-        } else {
-            request->send(400, "text/plain", "Missing parameter");
-        }
-    });
+            request->send(200, "text/plain", "Speed set to: " + String(speed));
+            sendLog("Speed set to: " + String(speed));
+        }}
+    );
 
     server.on("/set", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (request->hasParam("p")) {
             animation = request->getParam("p")->value().toInt();
-            request->send(200, "text/plain", "Animation updated");
-        } else {
-            request->send(400, "text/plain", "Missing parameter");
-        }
-    });
+            currentAnimationId = animation;
+            request->send(200, "text/plain", "Animation set to ID: " + String(animation));
+            sendLog("Animation set to ID: " + String(animation));
+        }}
+    );
 
     server.begin();
-    Serial.println("Server started at: http://" + WiFi.localIP().toString());
+    sendLog("Server started at: http://" + WiFi.localIP().toString());
 
     xTaskCreatePinnedToCore(animationTask, "AnimationTask", 10000, nullptr, 1, nullptr, 0);
 }
 
 void loop() {
-    // Keeping empty
+    ws.cleanupClients();
 }
