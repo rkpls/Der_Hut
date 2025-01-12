@@ -230,14 +230,14 @@ void animationTask(void *parameter) {
 }
 //----------------------------------------------------------------
 void setup() {
-    Serial.begin(9600);
+    Serial.begin(115200);
 
     if (!LittleFS.begin()) {
-        Serial.println("Failed to mount LittleFS!");
-    } else {
-        Serial.println("LittleFS mounted successfully.");
+        Serial.println("LittleFS mount failed!");
+        return;  // Halt setup if file system is unavailable
     }
-
+    Serial.println("LittleFS mounted successfully.");
+    
     loadSettings();
 
     FastLED.addLeds<WS2812B, DATA_PIN_1, GRB>(leds, 0, MATRIX_NUM_LEDS);
@@ -253,26 +253,20 @@ void setup() {
         Serial.print(".");
     }
     Serial.println("Connected to Wi-Fi");
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
 
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (!LittleFS.exists("/main.html")) {
+            Serial.println("HTML file not found!");
+            request->send(404, "text/plain", "HTML file not found");
+            return;
+        }
         request->send(LittleFS, "/main.html", "text/html");
     });
 
-    server.on("/update", HTTP_POST, [](AsyncWebServerRequest *request) {
-        if (request->hasParam("brightness", true)) {
-            brightness = request->getParam("brightness", true)->value().toInt();
-        }
-        if (request->hasParam("animation", true)) {
-            animation = request->getParam("animation", true)->value().toInt();
-        }
-        if (request->hasParam("speed", true)) {
-            speed = request->getParam("speed", true)->value().toInt();
-        }
-        saveSettings();
-        request->send(200, "text/plain", "Settings updated");
-    });
-
     server.begin();
+    Serial.println("Server started at: http://" + WiFi.localIP().toString());
 
     xTaskCreatePinnedToCore(animationTask, "AnimationTask", 10000, nullptr, 1, nullptr, 0);
 }
