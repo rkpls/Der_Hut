@@ -22,8 +22,6 @@ int brightness = 10; // Default brightness
 int animation = 1;   // Default animation ID
 int speed = 10;      // Default speed
 
-std::vector<std::vector<std::vector<uint8_t>>> image;
-std::vector<std::vector<std::vector<uint8_t>>> frames;
 int numFrames = 0;
 int currentAnimationId = 0;
 
@@ -49,12 +47,39 @@ int getVirtualIndex(int x, int y) {
 }
 
 //----------------------------------------------------------------
+void pride() {
+    static uint16_t frame = 0; // Keeps track of the animation frame
+    for (int y = 0; y < MATRIX_HEIGHT; y++) {
+        for (int x = 0; x < VIRT_WIDTH; x++) {
+            // Calculate the color hue based on position and frame
+            uint8_t hue = (x * 10 + y * 10 + frame) % 255;
+            leds[getVirtualIndex(x, y)] = CHSV(hue, 255, 255); // Full saturation and brightness
+        }
+    }
+
+    // Show the updated LEDs
+    FastLED.show();
+
+    // Increment the frame for the next iteration
+    frame += speed / 10; // Adjust speed dynamically
+    if (frame >= 255) {
+        frame = 0; // Reset frame to loop the animation
+    }
+
+    // Delay to control the animation speed
+    vTaskDelay(speed / portTICK_PERIOD_MS);
+}
+
 void animationTask(void *parameter) {
     while (true) {
         switch (currentAnimationId) {
             case 0:
                 FastLED.clear();
                 FastLED.show();
+                vTaskDelay(100 / portTICK_PERIOD_MS);
+                break;
+            case 1:
+                pride();
                 break;
             default:
                 FastLED.clear();
@@ -95,62 +120,34 @@ void setup() {
         request->send(LittleFS, "/main.html", "text/html");
     });
 
-    server.on("/setAnimation", HTTP_POST, [](AsyncWebServerRequest *request){
-        if (request->hasParam("body", true)) {
-            String body = request->getParam("body", true)->value();
-            StaticJsonDocument<200> doc;
-            DeserializationError error = deserializeJson(doc, body);
-            if (!error) {
-                int animationId = doc["animation"];
-                // Set the animation ID accordingly
-                currentAnimationId = animationId;
-                request->send(200, "application/json", "{\"status\":\"success\"}");
-            } else {
-                request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Invalid JSON\"}");
-            }
+    server.on("/brightness", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (request->hasParam("b")) {
+            brightness = request->getParam("b")->value().toInt();
+            FastLED.setBrightness(brightness);
+            request->send(200, "text/plain", "Brightness updated");
         } else {
-            request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"No body found\"}");
+            request->send(400, "text/plain", "Missing parameter");
         }
     });
 
-    server.on("/setBrightness", HTTP_POST, [](AsyncWebServerRequest *request){
-        if (request->hasParam("body", true)) {
-            String body = request->getParam("body", true)->value();
-            StaticJsonDocument<200> doc;
-            DeserializationError error = deserializeJson(doc, body);
-            if (!error) {
-                int brightnessValue = doc["brightness"];
-                // Set the brightness accordingly
-                brightness = brightnessValue;
-                FastLED.setBrightness(brightness);
-                request->send(200, "application/json", "{\"status\":\"success\"}");
-            } else {
-                request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Invalid JSON\"}");
-            }
+    server.on("/speed", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (request->hasParam("b")) {
+            speed = request->getParam("b")->value().toInt();
+            request->send(200, "text/plain", "Speed updated");
         } else {
-            request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"No body found\"}");
+            request->send(400, "text/plain", "Missing parameter");
         }
     });
 
-    server.on("/setSpeed", HTTP_POST, [](AsyncWebServerRequest *request){
-        if (request->hasParam("body", true)) {
-            String body = request->getParam("body", true)->value();
-            StaticJsonDocument<200> doc;
-            DeserializationError error = deserializeJson(doc, body);
-            if (!error) {
-                int speedValue = doc["speed"];
-                // Set the speed accordingly
-                speed = speedValue;
-                request->send(200, "application/json", "{\"status\":\"success\"}");
-            } else {
-                request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Invalid JSON\"}");
-            }
+    server.on("/set", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (request->hasParam("p")) {
+            animation = request->getParam("p")->value().toInt();
+            request->send(200, "text/plain", "Animation updated");
         } else {
-            request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"No body found\"}");
+            request->send(400, "text/plain", "Missing parameter");
         }
     });
 
-    // Start server
     server.begin();
     Serial.println("Server started at: http://" + WiFi.localIP().toString());
 

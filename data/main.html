@@ -3,32 +3,6 @@
     <head>
         <meta charset="UTF-8">
         <title>ESP32 Animation Control</title>
-        <script>
-            function sendPostRequest(endpoint, data) {
-                fetch(endpoint, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(data)
-                })
-                .then(response => response.json())
-                .then(data => console.log('Success:', data))
-                .catch((error) => console.error('Error:', error));
-            }
-    
-            function setAnimation(animationId) {
-                sendPostRequest('/setAnimation', { animation: animationId });
-            }
-    
-            function setBrightness(value) {
-                sendPostRequest('/setBrightness', { brightness: value });
-            }
-    
-            function setSpeed(value) {
-                sendPostRequest('/setSpeed', { speed: value });
-            }
-        </script>
     </head>
 <body>
     <style>
@@ -84,11 +58,8 @@
         <button onclick="setAnimation(1)">Pride</button>
         <button onclick="setAnimation(2)">VIP</button>
         <button onclick="setAnimation(3)">EDM</button>
-        <br><br>
+        <br>
         <label for="brightness">Brightness: </label>
         <input type="range" id="brightness" min="0" max="255" value="10" oninput="setBrightness(this.value)">
-        <br><br>
-        <label for="speed">Speed: </label>
-        <input type="range" id="speed" min="5" max="25" value="10" oninput="setSpeed(this.value)">
     </body>
     </html>
