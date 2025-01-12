@@ -30,54 +30,6 @@ int currentAnimationId = 0;
 AsyncWebServer server(80);
 
 //----------------------------------------------------------------
-void loadSettings() {
-    File file = LittleFS.open("/settings.json", "r");
-    if (!file) {
-        Serial.println("Failed to open settings file");
-        return;
-    }
-    DynamicJsonDocument doc(256);
-    DeserializationError error = deserializeJson(doc, file);
-    if (error) {
-        Serial.println("Failed to parse settings file");
-        file.close();
-        return;
-    }
-
-    // Read data from JSON into variables
-    brightness = doc["brightness"] | 10;
-    animation = doc["animation"] | 1;
-    speed = doc["speed"] | 10;
-
-    Serial.println("Settings loaded:");
-    Serial.print("Brightness: "); Serial.println(brightness);
-    Serial.print("Animation: "); Serial.println(animation);
-    Serial.print("Speed: "); Serial.println(speed);
-
-    file.close();
-}
-
-void saveSettings() {
-    DynamicJsonDocument doc(256);
-    doc["brightness"] = brightness;
-    doc["animation"] = animation;
-    doc["speed"] = speed;
-
-    File file = LittleFS.open("/settings.json", "w");
-    if (!file) {
-        Serial.println("Failed to open settings file for writing");
-        return;
-    }
-
-    if (serializeJson(doc, file) == 0) {
-        Serial.println("Failed to write to settings file");
-    } else {
-        Serial.println("Settings saved successfully.");
-    }
-
-    file.close();
-}
-//----------------------------------------------------------------
 int getVirtualIndex(int x, int y) {
     int panel = x / 16; // Determine which panel (0, 1, or 2)
     int localX = x % 16; // Local x-coordinate within the panel
@@ -143,16 +95,18 @@ bool loadAnimationFromJson(const char *filePath) {
 //----------------------------------------------------------------
 void pride() {
     static uint8_t frame = 0;
-    for (int x = 0; x < VIRT_WIDTH; x++) {
-        for (int y = 0; y < MATRIX_HEIGHT; y++) {
-            uint8_t hue = (x * 10 + y * 10 + frame) % 256;
-            int index = y * VIRT_WIDTH + x;
-            leds[index] = CHSV(hue, 255, brightness);
+    while (currentAnimationId == 1) {
+        for (int x = 0; x < VIRT_WIDTH; x++) {
+            for (int y = 0; y < MATRIX_HEIGHT; y++) {
+                uint8_t hue = (x * 10 + y * 10 + frame) % 256;
+                int index = y * VIRT_WIDTH + x;
+                leds[index] = CHSV(hue, 255, brightness);
+            }
         }
+        frame = (frame + 1) % 256;
+        FastLED.show();
+        vTaskDelay(speed * 12 / portTICK_PERIOD_MS);
     }
-    frame = (frame + 1) % 256;
-    FastLED.show();
-    delay(speed);
 }
 
 void vip() {
@@ -207,7 +161,7 @@ void edm() {
 //----------------------------------------------------------------
 void animationTask(void *parameter) {
     while (true) {
-        switch (animation) {
+        switch (currentAnimationId) {
             case 0:
                 FastLED.clear();
                 FastLED.show();
@@ -226,19 +180,18 @@ void animationTask(void *parameter) {
                 FastLED.show();
                 break;
         }
+        vTaskDelay(10 / portTICK_PERIOD_MS); // Prevent busy looping
     }
 }
 //----------------------------------------------------------------
 void setup() {
     Serial.begin(115200);
 
-    if (!LittleFS.begin()) {
-        Serial.println("LittleFS mount failed!");
-        return;  // Halt setup if file system is unavailable
+    if (LittleFS.begin()) {
+        Serial.println("LittleFS mounted.");
+    } else {
+        Serial.println("LittleFS mount failed.");
     }
-    Serial.println("LittleFS mounted successfully.");
-    
-    loadSettings();
 
     FastLED.addLeds<WS2812B, DATA_PIN_1, GRB>(leds, 0, MATRIX_NUM_LEDS);
     FastLED.addLeds<WS2812B, DATA_PIN_2, GRB>(leds, MATRIX_NUM_LEDS, MATRIX_NUM_LEDS);
@@ -256,13 +209,37 @@ void setup() {
     Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
 
+    // Set up routes
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!LittleFS.exists("/main.html")) {
-            Serial.println("HTML file not found!");
-            request->send(404, "text/plain", "HTML file not found");
-            return;
-        }
         request->send(LittleFS, "/main.html", "text/html");
+    });
+
+    server.on("/brightness", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (request->hasParam("b")) {
+            brightness = request->getParam("b")->value().toInt();
+            FastLED.setBrightness(brightness);
+            request->send(200, "text/plain", "Brightness updated");
+        } else {
+            request->send(400, "text/plain", "Missing parameter");
+        }
+    });
+
+    server.on("/speed", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (request->hasParam("b")) {
+            speed = request->getParam("b")->value().toInt();
+            request->send(200, "text/plain", "Speed updated");
+        } else {
+            request->send(400, "text/plain", "Missing parameter");
+        }
+    });
+
+    server.on("/set", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (request->hasParam("p")) {
+            animation = request->getParam("p")->value().toInt();
+            request->send(200, "text/plain", "Animation updated");
+        } else {
+            request->send(400, "text/plain", "Missing parameter");
+        }
     });
 
     server.begin();
@@ -272,5 +249,5 @@ void setup() {
 }
 
 void loop() {
-    // Keep loop empty
+    // Keeping empty
 }
