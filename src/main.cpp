@@ -1,7 +1,6 @@
 #include <WiFi.h>
 #include <FastLED.h>
 #include <ESPAsyncWebServer.h>
-#include <SPIFFS.h>
 #include <LittleFS.h>
 #include <FS.h>
 #include "config.h" // Wi-Fi credentials
@@ -32,7 +31,7 @@ AsyncWebServer server(80);
 
 //----------------------------------------------------------------
 void loadSettings() {
-    File file = SPIFFS.open("../files/settings.json", "r");
+    File file = LittleFS.open("/settings.json", "r");
     if (!file) {
         Serial.println("Failed to open settings file");
         return;
@@ -41,12 +40,19 @@ void loadSettings() {
     DeserializationError error = deserializeJson(doc, file);
     if (error) {
         Serial.println("Failed to parse settings file");
+        file.close();
         return;
     }
 
+    // Read data from JSON into variables
     brightness = doc["brightness"] | 10;
     animation = doc["animation"] | 1;
     speed = doc["speed"] | 10;
+
+    Serial.println("Settings loaded:");
+    Serial.print("Brightness: "); Serial.println(brightness);
+    Serial.print("Animation: "); Serial.println(animation);
+    Serial.print("Speed: "); Serial.println(speed);
 
     file.close();
 }
@@ -57,7 +63,7 @@ void saveSettings() {
     doc["animation"] = animation;
     doc["speed"] = speed;
 
-    File file = SPIFFS.open("../files/settings.json", "w");
+    File file = LittleFS.open("/settings.json", "w");
     if (!file) {
         Serial.println("Failed to open settings file for writing");
         return;
@@ -65,6 +71,8 @@ void saveSettings() {
 
     if (serializeJson(doc, file) == 0) {
         Serial.println("Failed to write to settings file");
+    } else {
+        Serial.println("Settings saved successfully.");
     }
 
     file.close();
@@ -74,13 +82,11 @@ int getVirtualIndex(int x, int y) {
     int panel = x / 16; // Determine which panel (0, 1, or 2)
     int localX = x % 16; // Local x-coordinate within the panel
     int localIndex;
-    // Zigzag arrangement: even rows left-to-right, odd rows right-to-left
     if (y % 2 == 0) {
         localIndex = y * 16 + localX;
     } else {
         localIndex = y * 16 + (15 - localX);
     }
-    // Map to the appropriate panel
     if (panel == 0) {
         return localIndex; // Panel 1 (connected to pin 2)
     } else if (panel == 1) {
@@ -91,33 +97,27 @@ int getVirtualIndex(int x, int y) {
 }
 
 bool loadAnimationFromJson(const char *filePath) {
-    // Clear previous frames
     frames.clear();
     numFrames = 0;
-
     // Open the file
     File file = LittleFS.open(filePath, "r");
     if (!file) {
         Serial.println("Failed to open JSON file!");
         return false;
     }
-
     // Allocate a buffer for the file
     size_t fileSize = file.size();
     std::unique_ptr<char[]> jsonBuffer(new char[fileSize + 1]);
     file.readBytes(jsonBuffer.get(), fileSize);
     jsonBuffer[fileSize] = '\0';
     file.close();
-
-    // Parse the JSON
-    StaticJsonDocument<4096> doc; // Adjust size as needed for your JSON data
+    StaticJsonDocument<4096> doc;
     DeserializationError error = deserializeJson(doc, jsonBuffer.get());
     if (error) {
         Serial.print("JSON parsing failed: ");
         Serial.println(error.c_str());
         return false;
     }
-
     // Extract frames
     JsonArray jsonFrames = doc["frames"].as<JsonArray>();
     for (JsonArray frame : jsonFrames) {
@@ -146,7 +146,7 @@ void pride() {
     for (int x = 0; x < VIRT_WIDTH; x++) {
         for (int y = 0; y < MATRIX_HEIGHT; y++) {
             uint8_t hue = (x * 10 + y * 10 + frame) % 256;
-            int index = y * VIRT_WIDTH + x; // Adjust as needed
+            int index = y * VIRT_WIDTH + x;
             leds[index] = CHSV(hue, 255, brightness);
         }
     }
@@ -156,7 +156,7 @@ void pride() {
 }
 
 void vip() {
-    if (!loadAnimationFromJson("/files/vip.json")) {
+    if (!loadAnimationFromJson("/vip.json")) {
         Serial.println("Failed to load VIP animation!");
         return;
     }
@@ -181,7 +181,7 @@ void vip() {
 }
 
 void edm() {
-    if (!loadAnimationFromJson("../files/edm.json")) {
+    if (!loadAnimationFromJson("/edm.json")) {
         Serial.println("Failed to load EDM animation!");
         return;
     }
@@ -204,16 +204,6 @@ void edm() {
     }
 }
 
-
-void dart() {
-    // Placeholder for EDM animation
-}
-
-void text() {
-    // Placeholder for EDM animation
-}
-
-
 //----------------------------------------------------------------
 void animationTask(void *parameter) {
     while (true) {
@@ -231,12 +221,6 @@ void animationTask(void *parameter) {
             case 3:
                 edm();
                 break;
-            case 4:
-                dart();
-                break;
-            case 5:
-                text();
-                break;
             default:
                 FastLED.clear();
                 FastLED.show();
@@ -246,16 +230,12 @@ void animationTask(void *parameter) {
 }
 //----------------------------------------------------------------
 void setup() {
-    Serial.begin(115200);
-    
-    if (!LittleFS.begin()) {
-        Serial.println("An error occurred while mounting LittleFS");
-        return;
-    }
+    Serial.begin(9600);
 
-    if (!SPIFFS.begin(true)) {
-        Serial.println("An error occurred while mounting SPIFFS");
-        return;
+    if (!LittleFS.begin()) {
+        Serial.println("Failed to mount LittleFS!");
+    } else {
+        Serial.println("LittleFS mounted successfully.");
     }
 
     loadSettings();
@@ -275,7 +255,7 @@ void setup() {
     Serial.println("Connected to Wi-Fi");
 
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(SPIFFS, "../files/main.html", "text/html");
+        request->send(LittleFS, "/main.html", "text/html");
     });
 
     server.on("/update", HTTP_POST, [](AsyncWebServerRequest *request) {
