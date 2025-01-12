@@ -2,6 +2,7 @@
 #include <FastLED.h>
 #include <ESPAsyncWebServer.h>
 #include <SPIFFS.h>
+#include <LittleFS.h>
 #include <FS.h>
 #include "config.h" // Wi-Fi credentials
 #include <ArduinoJson.h> // For JSON parsing
@@ -22,6 +23,7 @@ int brightness = 10; // Default brightness
 int animation = 1;   // Default animation ID
 int speed = 10;      // Default speed
 
+std::vector<std::vector<std::vector<uint8_t>>> image;
 std::vector<std::vector<std::vector<uint8_t>>> frames;
 int numFrames = 0;
 int currentAnimationId = 0;
@@ -154,22 +156,28 @@ void pride() {
 }
 
 void vip() {
-    if (!loadAnimationFromJson("../files/vip.json")) {
-        Serial.println("Failed to load EDM animation!");
+    if (!loadAnimationFromJson("/files/vip.json")) {
+        Serial.println("Failed to load VIP animation!");
         return;
     }
     static int frame = 0;
-    for (int y = 0; y < 10; y++) {
-        for (int x = 0; x < 48; x++) {
-            int segment = (x + frame) / 16 % 3;
-            int localX = (x + frame) % 16;
-            int index = getVirtualIndex(x, y);
-            leds[index] = CRGB(image[y][localX][0], image[y][localX][1], image[y][localX][2]);
+    while (currentAnimationId == 2) {
+        for (int y = 0; y < MATRIX_HEIGHT; y++) {
+            for (int x = 0; x < MATRIX_WIDTH; x++) {
+                int localX = (x + frame) % 16;
+                int segment = (x + frame) / 16 % 3;
+                int index = getVirtualIndex(x, y);
+                leds[index] = CRGB(
+                    image[y][localX][0], 
+                    image[y][localX][1], 
+                    image[y][localX][2]
+                );
+            }
         }
+        FastLED.show();
+        frame = (frame + 1) % MATRIX_WIDTH; // Wrap around the full width
+        vTaskDelay(speed * 12 / portTICK_PERIOD_MS);
     }
-    FastLED.show();
-    frame = (frame + 1) % 48; // Wrap
-    vTaskDelay(speed * 12 / portTICK_PERIOD_MS);
 }
 
 void edm() {
