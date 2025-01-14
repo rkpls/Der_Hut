@@ -19,7 +19,7 @@ const int MATRIX_HEIGHT = 10;
 CRGB leds[VIRT_NUM_LEDS];
 
 int brightness = 10; // Default brightness
-int animation = 1;   // Default animation ID
+int animation = 0;   // Default animation ID
 int speed = 10;      // Default speed
 
 std::vector<std::vector<std::vector<uint8_t>>> image;
@@ -42,9 +42,9 @@ int getVirtualIndex(int x, int y) {
     int localX = x % 16; // Local x-coordinate within the panel
     int localIndex;
     if (y % 2 == 0) {
-        localIndex = y * 16 + localX;
+        localIndex = y * 16 + localX; //odd rows
     } else {
-        localIndex = y * 16 + (15 - localX);
+        localIndex = y * 16 + (15 - localX); //even rows
     }
     if (panel == 0) {
         return localIndex; // Panel 1 (connected to pin 2)
@@ -144,26 +144,35 @@ void vip() {
 
 void edm() {
     static int frameIndex = 0; // Keeps track of the current frame
-    int imgWidth = frames[0][0].size() / 3; // Divide by 3 to get actual width
-    int imgHeight = frames[0].size();
+    int imgWidth = 10;        // Original width of the EDM frames
+    int imgHeight = 10;       // Original height of the EDM frames
 
     for (int y = 0; y < MATRIX_HEIGHT; y++) {
         for (int x = 0; x < VIRT_WIDTH; x++) {
-            int imgX = x % imgWidth; // Repeat image horizontally
+            int canvasX = x % 12; // Determine position within a single canvas (12x10)
+            int imgX = (canvasX > 0 && canvasX <= imgWidth) ? canvasX - 1 : -1; // Map to 10x10 if within bounds, otherwise -1 for padding
             int imgY = y % imgHeight;
-            int baseIndex = imgX * 3; // Calculate RGB index
-            leds[getVirtualIndex(x, y)] = CRGB(
-                frames[frameIndex][imgY][baseIndex],     // Red
-                frames[frameIndex][imgY][baseIndex + 1], // Green
-                frames[frameIndex][imgY][baseIndex + 2]  // Blue
-            );
+
+            if (imgX == -1) {
+                // Black padding for columns outside the 10x10 image
+                leds[getVirtualIndex(x, y)] = CRGB(0, 0, 0);
+            } else {
+                // Map pixel from the frame to the LED
+                int baseIndex = imgX * 3; // Calculate RGB index
+                leds[getVirtualIndex(x, y)] = CRGB(
+                    frames[frameIndex][imgY][baseIndex],     // Red
+                    frames[frameIndex][imgY][baseIndex + 1], // Green
+                    frames[frameIndex][imgY][baseIndex + 2]  // Blue
+                );
+            }
         }
     }
 
     FastLED.show();
     frameIndex = (frameIndex + 1) % numFrames; // Move to the next frame
-    vTaskDelay(speed / portTICK_PERIOD_MS); // Control animation speed
+    vTaskDelay(speed / portTICK_PERIOD_MS);    // Control animation speed
 }
+
 
 
 void animationTask(void *parameter) {
@@ -248,14 +257,6 @@ void setup() {
             request->send(200, "text/plain", "Brightness set to: " + String(brightness));
             sendLog("Brightness set to: " + String(brightness));
         }}       
-    );
-
-    server.on("/speed", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (request->hasParam("b")) {
-            speed = request->getParam("b")->value().toInt();
-            request->send(200, "text/plain", "Speed set to: " + String(speed));
-            sendLog("Speed set to: " + String(speed));
-        }}
     );
 
     server.on("/set", HTTP_GET, [](AsyncWebServerRequest *request) {
