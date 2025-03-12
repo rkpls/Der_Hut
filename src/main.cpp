@@ -3,6 +3,8 @@
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
 #include <FS.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_NeoMatrix.h>
 #include "config.h" // Wi-Fi credentials
 #include <ArduinoJson.h> // For JSON parsing
 
