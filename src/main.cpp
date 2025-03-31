@@ -4,7 +4,6 @@
 #include <LittleFS.h>
 #include <FS.h>
 #include "config.h" // Wi-Fi credentials
-#include "font.h"
 #include <ArduinoJson.h> // For JSON parsing
 
 #define DATA_PIN_1 2
