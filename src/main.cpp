@@ -3,6 +3,7 @@
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
 #include <FS.h>
+#include "font5x7.h"
 #include "config.h" // Wi-Fi credentials
 #include <ArduinoJson.h> // For JSON parsing
 
@@ -11,6 +12,7 @@
 #define DATA_PIN_3 5
 #define MATRIX_NUM_LEDS 160
 #define VIRT_NUM_LEDS 480
+#define font font5x7
 
 const int VIRT_WIDTH = 48;
 const int MATRIX_WIDTH = 16;
@@ -178,9 +180,41 @@ void edm() {
     vTaskDelay(speed / portTICK_PERIOD_MS);    // Control animation speed
 }
 
-void text() {
+void scrollText(const String &text, CRGB color = CRGB::White) {
+    int textLength = text.length() * (CHAR_WIDTH + 1); // Breite des Textes in Pixel
+    for (int offset = VIRT_WIDTH; offset > -textLength; offset--) {
+        fill_solid(leds, VIRT_NUM_LEDS, CRGB::Black); // Bildschirm löschen
 
+        for (int i = 0; i < text.length(); i++) {
+            int charX = offset + i * (CHAR_WIDTH + 1);
+            if (charX >= -CHAR_WIDTH && charX < VIRT_WIDTH) {
+                const uint8_t *bitmap = font5x7[text[i] - 32];
+                for (int x = 0; x < CHAR_WIDTH; x++) {
+                    for (int y = 0; y < CHAR_HEIGHT; y++) {
+                        if (bitmap[x] & (1 << y)) {
+                            int vx = charX + x;
+                            int vy = y + 1; // vertikal etwas zentrieren
+                            if (vx >= 0 && vx < VIRT_WIDTH && vy < MATRIX_HEIGHT) {
+                                leds[getVirtualIndex(vx, vy)] = color;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        FastLED.show();
+        delay(50); // Scroll-Geschwindigkeit
+    }
 }
+
+
+void displayIPAddress() {
+    IPAddress ip = WiFi.localIP();
+    String ipText = ip.toString(); // z.B. "192.168.178.42"
+    scrollText(ipText);
+}
+
 
 void animationTask(void *parameter) {
     while (true) {
@@ -213,25 +247,26 @@ void animationTask(void *parameter) {
 }
 
 //----------------------------------------------------------------
-void drawChar(int x, int y, char c, CRGB color) {
-    if (c < 32 || c > 127) return; // Only handle printable characters
-
-    // Get the character bitmap from the font array
-    const uint8_t* charBitmap = FONT_5X7[c - 32];
-
-    // Loop through each column of the character
-    for (int i = 0; i < CHAR_WIDTH; i++) {
-        uint8_t colData = charBitmap[i];
-        
-        // Loop through each bit to set pixels
-        for (int j = 0; j < CHAR_HEIGHT; j++) {
-            if (colData & (1 << j)) {
-                int ledIndex = getVirtualIndex(x + i, y + j);
-                if (ledIndex >= 0 && ledIndex < VIRT_NUM_LEDS) {
-                    leds[ledIndex] = color; // Set color if bit is high
+void drawChar(char c, int xOffset, int yOffset, CRGB color) {
+    if (c < 32 || c > 127) return; // Nur druckbare Zeichen
+    uint8_t* bitmap = (uint8_t*)font5x7[c - 32];
+    for (int x = 0; x < CHAR_WIDTH; x++) {
+        uint8_t col = bitmap[x];
+        for (int y = 0; y < CHAR_HEIGHT; y++) {
+            if (col & (1 << y)) {
+                int virtualX = xOffset + x;
+                int virtualY = yOffset + y;
+                if (virtualX < VIRT_WIDTH && virtualY < MATRIX_HEIGHT) {
+                    leds[getVirtualIndex(virtualX, virtualY)] = color;
                 }
             }
         }
+    }
+}
+
+void drawText(String text, int x, int y, CRGB color) {
+    for (int i = 0; i < text.length(); i++) {
+        drawChar(text[i], x + i * (CHAR_WIDTH + 1), y, color); // +1 für Abstand
     }
 }
 
