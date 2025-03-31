@@ -3,9 +3,8 @@
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
 #include <FS.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_NeoMatrix.h>
 #include "config.h" // Wi-Fi credentials
+#include "font.h"
 #include <ArduinoJson.h> // For JSON parsing
 
 #define DATA_PIN_1 2
@@ -18,11 +17,17 @@ const int VIRT_WIDTH = 48;
 const int MATRIX_WIDTH = 16;
 const int MATRIX_HEIGHT = 10;
 
+
+const int CHAR_WIDTH = 5;
+const int CHAR_HEIGHT = 7;
+
 CRGB leds[VIRT_NUM_LEDS];
 
 int brightness = 10; // Default brightness
 int animation = 0;   // Default animation ID
 int speed = 10;      // Default speed
+
+bool webPageAccessed = false;
 
 std::vector<std::vector<std::vector<uint8_t>>> image;
 std::vector<std::vector<std::vector<uint8_t>>> frames;
@@ -143,7 +148,6 @@ void vip() {
     vTaskDelay(speed * 12 / portTICK_PERIOD_MS);
 }
 
-
 void edm() {
     static int frameIndex = 0; // Keeps track of the current frame
     int imgWidth = 10;        // Original width of the EDM frames
@@ -175,34 +179,75 @@ void edm() {
     vTaskDelay(speed / portTICK_PERIOD_MS);    // Control animation speed
 }
 
+void text() {
 
+}
 
 void animationTask(void *parameter) {
     while (true) {
-        switch (currentAnimationId) {
-            case 0:
-                FastLED.clear();
-                FastLED.show();
-                break;
-            case 1:
-                pride();
-                break;
-            case 2:
-                vip();
-                break;            
-            case 3:
-                edm();
-                break;       
-            default:
-                FastLED.clear();
-                FastLED.show();
-                break;
+        if (!webPageAccessed) {
+            displayIPAddress(); // Display IP address until web page is accessed
+        } else {
+            // Perform animations based on the currentAnimationId
+            switch (currentAnimationId) {
+                case 0:
+                    FastLED.clear();
+                    FastLED.show();
+                    break;
+                case 1:
+                    pride();
+                    break;
+                case 2:
+                    vip();
+                    break;            
+                case 3:
+                    edm();
+                    break;       
+                default:
+                    FastLED.clear();
+                    FastLED.show();
+                    break;
+            }
         }
         vTaskDelay(10 / portTICK_PERIOD_MS); // Prevent busy looping
     }
 }
 
 //----------------------------------------------------------------
+void drawChar(int x, int y, char c, CRGB color) {
+    if (c < 32 || c > 127) return; // Only handle printable characters
+
+    // Get the character bitmap from the font array
+    const uint8_t* charBitmap = FONT_5X7[c - 32];
+
+    // Loop through each column of the character
+    for (int i = 0; i < CHAR_WIDTH; i++) {
+        uint8_t colData = charBitmap[i];
+        
+        // Loop through each bit to set pixels
+        for (int j = 0; j < CHAR_HEIGHT; j++) {
+            if (colData & (1 << j)) {
+                int ledIndex = getVirtualIndex(x + i, y + j);
+                if (ledIndex >= 0 && ledIndex < VIRT_NUM_LEDS) {
+                    leds[ledIndex] = color; // Set color if bit is high
+                }
+            }
+        }
+    }
+}
+
+void displayIPAddress() {
+    FastLED.clear();
+    String ip = WiFi.localIP().toString();
+    int startX = (VIRT_WIDTH - ip.length() * (CHAR_WIDTH + 1)) / 2; // Center the text
+    int startY = (MATRIX_HEIGHT - CHAR_HEIGHT) / 2; // Vertically center
+
+    for (int i = 0; i < ip.length(); i++) {
+        drawChar(startX + i * (CHAR_WIDTH + 1), startY, ip[i], CRGB::White);
+    }
+    FastLED.show();
+}
+
 void setup() {
     Serial.begin(115200);
 
@@ -249,6 +294,7 @@ void setup() {
 
     // Set up routes
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+        webPageAccessed = true; // Set flag when page is accessed
         request->send(LittleFS, "/main.html", "text/html");
     });
 
