@@ -149,6 +149,29 @@ void vip() {
     vTaskDelay(speed * 12 / portTICK_PERIOD_MS);
 }
 
+void mod() {
+    static int offset = 0; // Offset for rotating the image
+    int imgWidth = image[0][0].size() / 3; // Divide by 3 to get actual width
+    int imgHeight = image[0].size();
+
+    for (int y = 0; y < MATRIX_HEIGHT; y++) {
+        for (int x = 0; x < VIRT_WIDTH; x++) {
+            int imgX = (x + offset) % imgWidth; // Rotate horizontally
+            int imgY = y % imgHeight;
+            int baseIndex = imgX * 3; // Calculate RGB index
+            leds[getVirtualIndex(x, y)] = CRGB(
+                image[0][imgY][baseIndex],     // Red
+                image[0][imgY][baseIndex + 1], // Green
+                image[0][imgY][baseIndex + 2]  // Blue
+            );
+        }
+    }
+
+    FastLED.show();
+    offset = (offset + 1) % imgWidth; // Increment offset for rotation
+    vTaskDelay(speed * 12 / portTICK_PERIOD_MS);
+}
+
 void edm() {
     static int frameIndex = 0; // Keeps track of the current frame
     int imgWidth = 10;        // Original width of the EDM frames
@@ -177,7 +200,7 @@ void edm() {
 
     FastLED.show();
     frameIndex = (frameIndex + 1) % numFrames; // Move to the next frame
-    vTaskDelay(speed / portTICK_PERIOD_MS);    // Control animation speed
+    vTaskDelay(speed * 4 / portTICK_PERIOD_MS);    // Control animation speed
 }
 
 void scrollText(const String &text, CRGB color = CRGB::White) {
@@ -195,7 +218,7 @@ void scrollText(const String &text, CRGB color = CRGB::White) {
                             int vx = charX + x;
                             int vy = y + 1; // vertikal etwas zentrieren
                             if (vx >= 0 && vx < VIRT_WIDTH && vy < MATRIX_HEIGHT) {
-                                leds[getVirtualIndex(vx, vy)] = color;
+                                leds[getVirtualIndex(VIRT_WIDTH - 1 - vx, vy)] = color;
                             }
                         }
                     }
@@ -204,14 +227,14 @@ void scrollText(const String &text, CRGB color = CRGB::White) {
         }
 
         FastLED.show();
-        delay(50); // Scroll-Geschwindigkeit
+        delay(100); // Scroll-Geschwindigkeit
     }
 }
 
 
 void displayIPAddress() {
     IPAddress ip = WiFi.localIP();
-    String ipText = ip.toString(); // z.B. "192.168.178.42"
+    String ipText = ip.toString();
     scrollText(ipText);
 }
 
@@ -232,8 +255,11 @@ void animationTask(void *parameter) {
                     break;
                 case 2:
                     vip();
-                    break;            
+                    break;
                 case 3:
+                    mod();
+                    break;              
+                case 4:
                     edm();
                     break;       
                 default:
@@ -270,18 +296,6 @@ void drawText(String text, int x, int y, CRGB color) {
     }
 }
 
-void displayIPAddress() {
-    FastLED.clear();
-    String ip = WiFi.localIP().toString();
-    int startX = (VIRT_WIDTH - ip.length() * (CHAR_WIDTH + 1)) / 2; // Center the text
-    int startY = (MATRIX_HEIGHT - CHAR_HEIGHT) / 2; // Vertically center
-
-    for (int i = 0; i < ip.length(); i++) {
-        drawChar(startX + i * (CHAR_WIDTH + 1), startY, ip[i], CRGB::White);
-    }
-    FastLED.show();
-}
-
 void setup() {
     Serial.begin(115200);
 
@@ -295,7 +309,10 @@ void setup() {
     if (!loadAnimationFrames("/vip.json", "vip_img", image, numFrames)) {
         sendLog("Failed to load VIP animation.");
     }
-
+    // Load MOD animation
+    if (!loadAnimationFrames("/mod.json", "mod_img", image, numFrames)) {
+        sendLog("Failed to load VIP animation.");
+    }
     // Load EDM animation
     if (!loadAnimationFrames("/edm.json", "edm_animation", frames, numFrames)) {
         sendLog("Failed to load EDM animation.");
@@ -349,7 +366,21 @@ void setup() {
             sendLog("Animation set to ID: " + String(animation));
         }}
     );
-
+    server.on("/text", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (request->hasParam("t")) {
+            String text = request->getParam("t")->value();
+            scrollText(text);
+            request->send(200, "text/plain", "Text wird angezeigt: " + text);
+        } else {
+            request->send(400, "text/plain", "Kein Text angegeben");
+        }
+    });
+    
+    server.on("/ip", HTTP_GET, [](AsyncWebServerRequest *request) {
+        displayIPAddress();
+        request->send(200, "text/plain", "IP-Adresse wird angezeigt");
+    });
+    
     server.begin();
     sendLog("Server started at: http://" + WiFi.localIP().toString());
 

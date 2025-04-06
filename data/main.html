@@ -57,11 +57,16 @@
         }
     </style>
     <body>
-        <button onclick="setAnimation(0)">Turn Off</button>
+        <button onclick="setAnimation(0)">Off</button>
         <button onclick="setAnimation(1)">Pride</button>
         <button onclick="setAnimation(2)">VIP</button>
-        <button onclick="setAnimation(3)">EDM</button>
-        <button onclick="setAnimation(3)">Text</button>
+        <button onclick="setAnimation(3)">MOD</button>
+        <button onclick="setAnimation(4)">EDM</button>
+        <button onclick="setAnimation(5)">Text</button>
+        <input type="text" id="textInput" placeholder="Text eingeben...">
+        <button onclick="sendText()">Text anzeigen</button>
+        <button onclick="showIP()">IP anzeigen</button>
+
         <br>
         <label for="brightness">Brightness: </label>
         <br>
@@ -86,6 +91,27 @@
                     logToConsole(text);
                 } catch (error) {
                     logToConsole(`Error setting brightness: ${error.message}`);
+                }
+            }
+
+            async function sendText() {
+                const input = document.getElementById("textInput").value;
+                try {
+                    const response = await fetch(`/text?t=${encodeURIComponent(input)}`);
+                    const result = await response.text();
+                    logToConsole(result);
+                } catch (err) {
+                    logToConsole(`Fehler beim Senden: ${err.message}`);
+                }
+            }
+
+            async function showIP() {
+                try {
+                    const response = await fetch(`/ip`);
+                    const result = await response.text();
+                    logToConsole(result);
+                } catch (err) {
+                    logToConsole(`Fehler beim Abrufen: ${err.message}`);
                 }
             }
 
