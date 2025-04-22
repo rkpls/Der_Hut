@@ -32,6 +32,7 @@ std::vector<std::vector<std::vector<uint8_t>>> image;
 std::vector<std::vector<std::vector<uint8_t>>> frames;
 int numFrames = 0;
 int currentAnimationId = 0;
+int lastImageId = -1;
 
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
@@ -64,15 +65,18 @@ bool loadAnimationFrames(const char *fileName, const char *key, std::vector<std:
     DynamicJsonDocument doc(30000);
     DeserializationError error = deserializeJson(doc, file);
     file.close();
+
     if (error) {
         sendLog(String("Failed to parse JSON file: ") + fileName);
         return false;
     }
+
     JsonArray jsonFrames = doc[key].as<JsonArray>();
     if (jsonFrames.isNull()) {
         sendLog(String("Key '") + key + "' not found in file: " + fileName);
         return false;
     }
+
     animationFrames.resize(jsonFrames.size());
     frameCount = jsonFrames.size();
     for (size_t i = 0; i < jsonFrames.size(); i++) {
@@ -109,20 +113,25 @@ void pride() {
 
 void icon12x10(int id) {
     static int offset = 0;
-    static int lastId = -1;
-    if (id != lastId) {
-        if (id == 2) loadAnimationFrames("/vip.json", "vip_img", image, numFrames);
-        else if (id == 3) loadAnimationFrames("/mod_img_12x10.json", "mod_img", image, numFrames);
-        else {
-            sendLog("Unbekannte ID in icon12x10: " + String(id));
-            return;
-        }
-        lastId = id;
-        offset = 0;
+    String fileName, key;
+    if (id == 2) {
+        fileName = "/vip.json";
+        key = "vip_img";
+    } else if (id == 3) {
+        fileName = "/mod_img_12x10.json";
+        key = "mod_img";
+    } else {
+        sendLog("Unbekannte ID in icon12x10: " + String(id));
+        return;
     }
+
+    // Bild wird jedes Mal neu geladen (kein Caching)
+    loadAnimationFrames(fileName.c_str(), key.c_str(), image, numFrames);
+
     if (image.empty()) return;
     int imgWidth = image[0][0].size() / 3;
     int imgHeight = image[0].size();
+
     for (int y = 0; y < MATRIX_HEIGHT; y++) {
         for (int x = 0; x < VIRT_WIDTH; x++) {
             int imgX = (x + offset) % imgWidth;
@@ -188,7 +197,6 @@ void scrollText(const String &text, CRGB color = CRGB::White) {
         FastLED.show();
         delay(100);
     }
-    showTextNow = false; // Reset after showing
 }
 
 void displayIPAddress() {
@@ -202,14 +210,16 @@ void animationTask(void *parameter) {
         if (!webPageAccessed) {
             displayIPAddress();
         } else if (showTextNow) {
-            scrollText(liveText);
+            String tmpText = liveText;
+            showTextNow = false;
+            scrollText(tmpText);
         } else {
             switch (currentAnimationId) {
                 case 0: FastLED.clear(); FastLED.show(); break;
-                case 1: pride(); break;
+                case 1: pride(); lastImageId = -1; break;
                 case 2: icon12x10(2); break;
                 case 3: icon12x10(3); break;
-                case 4: edm(); break;
+                case 4: edm(); lastImageId = -1; break;
                 default: FastLED.clear(); FastLED.show(); break;
             }
         }
@@ -272,6 +282,7 @@ void setup() {
         if (request->hasParam("t")) {
             liveText = request->getParam("t")->value();
             showTextNow = true;
+            currentAnimationId = -1;
             request->send(200, "text/plain", "Text wird angezeigt: " + liveText);
         } else {
             request->send(400, "text/plain", "Kein Text angegeben");
