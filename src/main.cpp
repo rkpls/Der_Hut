@@ -66,7 +66,10 @@ bool loadJSONImage(const char *file, const char *key, std::vector<std::vector<st
     JsonArray arr = doc[key].as<JsonArray>();
     if (arr.isNull()) { sendLog("Key not found: " + String(key)); return false; }
 
-    out.resize(arr.size()); count = arr.size();
+    out.clear();
+    out.shrink_to_fit();
+    out.resize(arr.size());
+    count = arr.size();
     for (size_t i = 0; i < arr.size(); i++) {
         JsonArray frame = arr[i];
         out[i].resize(frame.size());
@@ -118,7 +121,7 @@ void scrollText(String txt, CRGB col = CRGB::White) {
             }
         }
         FastLED.show();
-        delay(100);
+        delay(50);
     }
 }
 
