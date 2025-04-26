@@ -6,8 +6,6 @@
 #include <ArduinoJson.h>
 #include "font5x7.h"
 #include "config.h"
-#include <freertos/FreeRTOS.h>
-#include <freertos/timers.h>
 
 // Pins und LED-Definitionen
 #define DATA_PIN_1 2
@@ -23,30 +21,28 @@
 
 // Globale Variablen
 CRGB leds[VIRT_NUM_LEDS];         // Haupt-LED-Array
-CRGB ledsBuffer[VIRT_NUM_LEDS];  // Buffer für Double Buffering
+CRGB ledsBuffer[VIRT_NUM_LEDS];    // Buffer für Double Buffering
 int brightness = 10;
 int speed = 10;
 volatile int currentAnimation = 0;
-volatile bool interruptRequested = false;
 bool webAccessed = false;
 bool showText = false;
 String displayText = "";
+unsigned long lastUpdateTime = 0;
+unsigned long animationInterval = 40; // Startwert, wird später angepasst
 
 // Datenstrukturen für Bilder und Animationen
-std::vector<std::vector<std::vector<uint8_t>>> image;
-std::vector<std::vector<std::vector<uint8_t>>> frames;
-int frameCount = 0;
+std::vector<std::vector<std::vector<uint8_t>>> edmFrames;
+int edmFrameCount = 0;
+std::vector<std::vector<std::vector<uint8_t>>> vipImage;
+std::vector<std::vector<std::vector<uint8_t>>> modImage;
 
 // Webserver und Websocket
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
-// Timer Handles
-TimerHandle_t animationTimer;
 // Forward declarations
-void animationTimerCallback(TimerHandle_t xTimer);
 void updateLEDs();
-BaseType_t xTimerIsRunning(TimerHandle_t xTimer); // Deklaration von xTimerIsRunning
 
 // Hilfsfunktionen
 void sendLog(String msg) {
@@ -145,20 +141,20 @@ void scrollText(String txt, int activeAnim, CRGB col = CRGB::White) {
     }
 }
 
-void showImage(const char *file, const char *key, int activeAnim) {
+void showImage(const std::vector<std::vector<std::vector<uint8_t>>> &imgData, int activeAnim) {
     static int offset = 0;
     if (currentAnimation != activeAnim) return;
-    if (image.empty()) return; // Sicherstellen, dass das Bild geladen ist
+    if (imgData.empty()) return; // Sicherstellen, dass das Bild geladen ist
 
-    int w = image[0][0].size() / 3;
-    int h = image[0].size();
+    int w = imgData[0][0].size() / 3;
+    int h = imgData[0].size();
     for (int y = 0; y < MATRIX_HEIGHT; y++) {
         for (int x = 0; x < VIRT_WIDTH; x++) {
             int xx = (x + offset) % w;
             int yy = y % h;
             int base = xx * 3;
             ledsBuffer[getVirtualIndex(x, y)] = CRGB(
-                image[0][yy][base], image[0][yy][base + 1], image[0][yy][base + 2]);
+                imgData[0][yy][base], imgData[0][yy][base + 1], imgData[0][yy][base + 2]);
         }
     }
     offset = (offset + 1) % w;
@@ -167,10 +163,10 @@ void showImage(const char *file, const char *key, int activeAnim) {
 void edm(int activeAnim) {
     static int i = 0;
     if (currentAnimation != activeAnim) return;
-    if (frames.empty()) return; // Sicherstellen, dass die Frames geladen sind.
+    if (edmFrames.empty()) return; // Sicherstellen, dass die Frames geladen sind.
 
-    int w = frames[0][0].size() / 3;
-    int h = frames[0].size();
+    int w = edmFrames[0][0].size() / 3;
+    int h = edmFrames[0].size();
     for (int y = 0; y < MATRIX_HEIGHT; y++) {
         for (int x = 0; x < VIRT_WIDTH; x++) {
             int cx = x % (w + 2);
@@ -181,45 +177,15 @@ void edm(int activeAnim) {
             else {
                 int base = xx * 3;
                 ledsBuffer[getVirtualIndex(x, y)] = CRGB(
-                    frames[i][yy][base], frames[i][yy][base + 1], frames[i][yy][base + 2]);
+                    edmFrames[i][yy][base], edmFrames[i][yy][base + 1], edmFrames[i][yy][base + 2]);
             }
         }
     }
-    i = (i + 1) % frameCount;
+    i = (i + 1) % edmFrameCount;
 }
 
 void displayIP() {
     scrollText(WiFi.localIP().toString(), -99, CRGB::White);
-}
-
-// Timer Callback Funktion
-void animationTimerCallback(TimerHandle_t xTimer) {
-    if (showText) {
-        scrollText(displayText, -1);
-    }
-    else {
-        switch (currentAnimation) {
-            case 0:
-                fill_solid(ledsBuffer, VIRT_NUM_LEDS, CRGB::Black);
-                break;
-            case 1:
-                pride(currentAnimation);
-                break;
-            case 2:
-                showImage("/vip.json", "vip_img", currentAnimation);
-                break;
-            case 3:
-                showImage("/mod.json", "mod_img", currentAnimation);
-                break;
-            case 4:
-                edm(currentAnimation);
-                break;
-            default:
-                fill_solid(ledsBuffer, VIRT_NUM_LEDS, CRGB::Black);
-                break;
-        }
-    }
-    updateLEDs(); // Kopiere den Buffer zum Anzeigen
 }
 
 // Funktion zum Kopieren des Buffers auf die LEDs und Anzeigen
@@ -228,67 +194,55 @@ void updateLEDs() {
     FastLED.show();
 }
 
-// Animation Task (jetzt hauptsächlich für Timer-Erstellung und Verwaltung)
-void animationTask(void *param) {
-    // Erstelle den Timer, aber starte ihn noch nicht
-    animationTimer = xTimerCreate(
-        "animationTimer",      // Name des Timers
-        pdMS_TO_TICKS(speed), // Timer-Periode (kann später geändert werden)
-        pdTRUE,                 // Auto-Reload
-        (void *)0,             // Timer-ID (nicht verwendet)
-        animationTimerCallback); // Callback-Funktion
-
-     if (animationTimer == NULL) {
-        sendLog("Failed to create animation timer");
-        // Handle error appropriately
+void handleAnimation() {
+    if (showText) {
+        scrollText(displayText, -1);
+        animationInterval = 50; // Text Scroll Speed
+    } else {
+        switch (currentAnimation) {
+            case 0:
+                fill_solid(ledsBuffer, VIRT_NUM_LEDS, CRGB::Black);
+                animationInterval = speed * 4;
+                break;
+            case 1:
+                pride(currentAnimation);
+                animationInterval = speed * 4;
+                break;
+            case 2:
+                showImage(vipImage, currentAnimation);
+                animationInterval = speed * 10;
+                break;
+            case 3:
+                showImage(modImage, currentAnimation);
+                animationInterval = speed * 10;
+                break;
+            case 4:
+                edm(currentAnimation);
+                animationInterval = speed * 6;
+                break;
+            default:
+                fill_solid(ledsBuffer, VIRT_NUM_LEDS, CRGB::Black);
+                animationInterval = speed * 4;
+                break;
+        }
     }
-
-    while (true) {
-        if (!webAccessed) {
-            displayIP(); //Zeigt die IP nur an, wenn nicht auf die Webseite zugegriffen wurde.
-        }
-        else if (showText){
-             xTimerChangePeriod(animationTimer, pdMS_TO_TICKS(50), 0); //Text Scroll Speed
-             xTimerStart(animationTimer, 0);
-        }
-        else {
-            xTimerChangePeriod(animationTimer, pdMS_TO_TICKS(speed * 4), 0); //Setze die Timer-Periode für die aktuelle Animation
-            if (interruptRequested) {
-                interruptRequested = false;
-                xTimerStop(animationTimer, 0); // Stop timer wenn interrupt
-                fill_solid(leds, VIRT_NUM_LEDS, CRGB::Black);
-                FastLED.show();
-            }
-            // Starte den Timer, falls er nicht läuft.  Wichtig: Starte ihn *nur* hier, nicht in den Animationsfunktionen.
-            if (xTimerIsRunning(animationTimer) == pdFALSE && currentAnimation != 0) {
-                xTimerStart(animationTimer, 0);
-            }
-            else if (currentAnimation == 0){
-                xTimerStop(animationTimer, 0);
-                fill_solid(leds, VIRT_NUM_LEDS, CRGB::Black);
-                FastLED.show();
-            }
-        }
-        vTaskDelay(10 / portTICK_PERIOD_MS); // Kleinere Verzögerung
-    }
+    updateLEDs();
 }
 
-// Setup-Funktion
 void setup() {
     Serial.begin(115200);
     LittleFS.begin();
 
     // Lade Animationsdaten beim Start
-    if (!loadJSONImage("/edm.json", "edm_animation", frames, frameCount)) {
+    int dummyCount = 0;
+    if (!loadJSONImage("/edm.json", "edm_animation", edmFrames, edmFrameCount)) {
         sendLog("Failed to load /edm.json");
-        // Handle error: z.B. alle Animationen deaktivieren
-        frameCount = 0; // Damit edm() nicht auf ungültige Daten zugreift
+        edmFrameCount = 0;
     }
-    //Lade Bilder für Animationen
-     if (!loadJSONImage("/vip.json", "vip_img", image, frameCount)) {
+    if (!loadJSONImage("/vip.json", "vip_img", vipImage, dummyCount)) {
         sendLog("Failed to load /vip.json");
     }
-    if (!loadJSONImage("/mod.json", "mod_img", image, frameCount)) {
+    if (!loadJSONImage("/mod.json", "mod_img", modImage, dummyCount)) {
         sendLog("Failed to load /mod.json");
     }
 
@@ -321,7 +275,6 @@ void setup() {
         if (r->hasParam("p")) {
             currentAnimation = r->getParam("p")->value().toInt();
             showText = false;
-            interruptRequested = true;
             r->send(200, "text/plain", "Animation gesetzt: " + String(currentAnimation));
         }
     });
@@ -331,7 +284,6 @@ void setup() {
             displayText = r->getParam("t")->value();
             showText = true;
             currentAnimation = -1;
-            interruptRequested = true;
             r->send(200, "text/plain", "Text wird angezeigt: " + displayText);
         }
     });
@@ -344,10 +296,9 @@ void setup() {
         }
     });
 
-     server.on("/speed", HTTP_GET, [](AsyncWebServerRequest *r) {
+    server.on("/speed", HTTP_GET, [](AsyncWebServerRequest *r) {
         if (r->hasParam("s")) {
             speed = r->getParam("s")->value().toInt();
-            xTimerChangePeriod(animationTimer, pdMS_TO_TICKS(speed), 0); // Update Timer speed.
             r->send(200, "text/plain", "Speed: " + String(speed));
         }
     });
@@ -359,12 +310,20 @@ void setup() {
 
     server.begin();
     sendLog("HTTP Server ready");
-
-    // Starte den Animation Task
-    xTaskCreatePinnedToCore(animationTask, "animationTask", 10000, NULL, 1, NULL, 0);
 }
 
 void loop() {
     ws.cleanupClients();
-}
 
+    if (!webAccessed) {
+        sendLog("Display IP");
+        displayIP();
+        delay(5000); // Zeige die IP für 5 Sekunden
+    } else {
+        unsigned long currentTime = millis();
+        if (currentTime - lastUpdateTime >= animationInterval) {
+            lastUpdateTime = currentTime;
+            handleAnimation();
+        }
+    }
+}
