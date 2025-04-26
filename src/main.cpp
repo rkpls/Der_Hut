@@ -1,11 +1,3 @@
-// Komplett überarbeitete Version basierend auf deinen Anforderungen:
-// - Anzeige der IP bis Webzugriff
-// - pride: Regenbogen-Fade
-// - vip & mod: JSON Pixelbild rotiert
-// - edm: JSON Frame-Animation
-// - scrollText für Texteingabe
-// - Interrupt-Handling für Button-Requests
-
 #include <WiFi.h>
 #include <FastLED.h>
 #include <ESPAsyncWebServer.h>
@@ -68,8 +60,7 @@ bool loadJSONImage(const char *file, const char *key, std::vector<std::vector<st
 
     out.clear();
     out.shrink_to_fit();
-    out.resize(arr.size());
-    count = arr.size();
+    out.resize(arr.size()); count = arr.size();
     for (size_t i = 0; i < arr.size(); i++) {
         JsonArray frame = arr[i];
         out[i].resize(frame.size());
@@ -88,21 +79,24 @@ bool loadJSONImage(const char *file, const char *key, std::vector<std::vector<st
     return true;
 }
 
-void pride() {
+void pride(int activeAnim) {
     static uint8_t t = 0;
+    if (currentAnimation != activeAnim) return;
     for (int y = 0; y < MATRIX_HEIGHT; y++) {
+        if (currentAnimation != activeAnim) return;
         for (int x = 0; x < VIRT_WIDTH; x++) {
             leds[getVirtualIndex(x, y)] = CHSV((x * 5 + y * 10 + t) % 255, 255, 255);
         }
     }
     FastLED.show();
-    t += 1;
+    t = (t + 1) % 255;
     vTaskDelay(speed / portTICK_PERIOD_MS);
 }
 
-void scrollText(String txt, CRGB col = CRGB::White) {
+void scrollText(String txt, int activeAnim, CRGB col = CRGB::White) {
     int len = txt.length() * (CHAR_WIDTH + 1);
     for (int offset = VIRT_WIDTH; offset > -len; offset--) {
+        if (currentAnimation != activeAnim && !showText) return;
         fill_solid(leds, VIRT_NUM_LEDS, CRGB::Black);
         for (int i = 0; i < txt.length(); i++) {
             int x0 = offset + i * (CHAR_WIDTH + 1);
@@ -121,17 +115,18 @@ void scrollText(String txt, CRGB col = CRGB::White) {
             }
         }
         FastLED.show();
-        delay(50);
+        delay(100);
     }
 }
 
-void showImage(const char *file, const char *key) {
+void showImage(const char *file, const char *key, int activeAnim) {
     static int offset = 0;
-    loadJSONImage(file, key, image, frameCount);
-    if (image.empty()) return;
+    if (!loadJSONImage(file, key, image, frameCount)) return;
+    if (image.empty() || currentAnimation != activeAnim) return;
     int w = image[0][0].size() / 3;
     int h = image[0].size();
     for (int y = 0; y < MATRIX_HEIGHT; y++) {
+        if (currentAnimation != activeAnim) return;
         for (int x = 0; x < VIRT_WIDTH; x++) {
             int xx = (x + offset) % w;
             int yy = y % h;
@@ -145,12 +140,13 @@ void showImage(const char *file, const char *key) {
     vTaskDelay(speed * 12 / portTICK_PERIOD_MS);
 }
 
-void edm() {
+void edm(int activeAnim) {
     static int i = 0;
-    if (frames.empty()) return;
+    if (frames.empty() || currentAnimation != activeAnim) return;
     int w = frames[0][0].size() / 3;
     int h = frames[0].size();
     for (int y = 0; y < MATRIX_HEIGHT; y++) {
+        if (currentAnimation != activeAnim) return;
         for (int x = 0; x < VIRT_WIDTH; x++) {
             int cx = x % (w + 2);
             int xx = (cx > 0 && cx <= w) ? cx - 1 : -1;
@@ -169,27 +165,29 @@ void edm() {
 }
 
 void displayIP() {
-    IPAddress ip = WiFi.localIP();
-    scrollText(ip.toString());
+    scrollText(WiFi.localIP().toString(), -99); // kein Animationswechsel möglich
 }
 
 void animationTask(void *param) {
     while (true) {
         if (!webAccessed) displayIP();
         else if (showText) {
+            FastLED.clear(); FastLED.show();
             String t = displayText;
             showText = false;
-            scrollText(t);
+            scrollText(t, -1);
         } else {
             if (interruptRequested) {
                 interruptRequested = false;
+                FastLED.clear(); FastLED.show();
             }
-            switch (currentAnimation) {
+            int active = currentAnimation;
+            switch (active) {
                 case 0: FastLED.clear(); FastLED.show(); break;
-                case 1: pride(); break;
-                case 2: showImage("/vip.json", "vip_img"); break;
-                case 3: showImage("/mod.json", "mod_img"); break;
-                case 4: edm(); break;
+                case 1: pride(active); break;
+                case 2: showImage("/vip.json", "vip_img", active); break;
+                case 3: showImage("/mod.json", "mod_img", active); break;
+                case 4: edm(active); break;
                 default: FastLED.clear(); FastLED.show(); break;
             }
         }
