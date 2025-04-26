@@ -115,7 +115,7 @@ void scrollText(String txt, int activeAnim, CRGB col = CRGB::White) {
             }
         }
         FastLED.show();
-        delay(100);
+        delay(50);
     }
 }
 
@@ -206,7 +206,7 @@ void setup() {
     FastLED.addLeds<WS2812B, DATA_PIN_3, GRB>(leds, 2 * MATRIX_NUM_LEDS, MATRIX_NUM_LEDS);
     FastLED.setBrightness(brightness);
 
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
     while (WiFi.status() != WL_CONNECTED) {
         delay(200);
         Serial.print(".");
