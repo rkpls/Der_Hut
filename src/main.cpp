@@ -165,7 +165,7 @@ void edm(int activeAnim) {
 }
 
 void displayIP() {
-    scrollText(WiFi.localIP().toString(), -99); // kein Animationswechsel möglich
+    scrollText(WiFi.localIP().toString(), -99);
 }
 
 void animationTask(void *param) {
