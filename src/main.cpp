@@ -368,8 +368,3 @@ void loop() {
     ws.cleanupClients();
 }
 
-BaseType_t xTimerIsRunning(TimerHandle_t xTimer) {
-    // Implementierung von xTimerIsRunning
-    configASSERT(xTimer);
-    return (xTimer->xState != pdTIMER_NOT_STARTED);
-}
